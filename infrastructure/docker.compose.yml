@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  data-extractor:
+    build: .
+    environment:
+      - NEON_CONNECTION_STRING=${NEON_CONNECTION_STRING}
+      - CENSUS_API_KEY=${CENSUS_API_KEY}
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    command: python data-extractor.py
+
+  # Optional: Local PostgreSQL for testing
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=tax_scenarios
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
