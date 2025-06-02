@@ -1,4 +1,3 @@
-# .github/workflows/data-extraction.yml
 name: Tax Scenario Data Extraction
 
 on:
