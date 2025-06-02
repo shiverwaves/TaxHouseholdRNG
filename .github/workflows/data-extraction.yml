@@ -78,7 +78,7 @@ jobs:
         python data-extractor.py $FLAGS
     
     - name: Upload extraction logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()  # Upload logs even if extraction fails
       with:
         name: extraction-logs-${{ github.run_id }}
