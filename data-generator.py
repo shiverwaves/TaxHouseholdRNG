@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Fixed Enhanced Family Generator
+Enhanced Family Generator with Real Database Integration
 
-This version uses proper database queries and realistic income calculations
-to generate families with accurate demographic and economic data.
+This version integrates the rich database enhancements from generator_changes.py
+to use actual employment rates, education-occupation probabilities, and real wage data.
 
 Usage:
-    python fixed_family_generator.py --count 5
+    python enhanced_family_generator.py --count 5
 """
 
 import psycopg2
@@ -29,8 +29,8 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class FixedFamilyGenerator:
-    """Fixed family generator with realistic income calculations"""
+class EnhancedFamilyGenerator:
+    """Enhanced family generator with realistic income calculations and rich database integration"""
     
     def __init__(self):
         self.connection_string = os.getenv('NEON_CONNECTION_STRING')
@@ -58,11 +58,11 @@ class FixedFamilyGenerator:
         self.current_year = datetime.now().year
     
     def _load_cache_safely(self):
-        """Load cache with comprehensive error handling"""
-        logger.info("Loading data cache safely...")
+        """Enhanced cache loading with real demographic data"""
+        logger.info("Loading comprehensive data cache...")
         
         try:
-            # Initialize cache structure
+            # Initialize cache structure (add new sections)
             self._cache = {
                 'states': {},
                 'state_weights': {},
@@ -73,22 +73,167 @@ class FixedFamilyGenerator:
                 'occupations': {},
                 'state_occupation_wages': {},
                 'state_education_occupation_probs': {},
-                'national_education_occupation_probs': {}
+                'national_education_occupation_probs': {},
+                # NEW: Real demographic data
+                'state_employment_rates': {},
+                'education_occupation_probs': {},
+                'state_education_distributions': {}
             }
             
-            # Load each data type safely
+            # Load existing data
             self._load_states_safely()
             self._load_education_levels_safely()
             self._load_race_data_safely()
             self._load_family_structures_safely()
             self._load_occupation_data_safely()
             
-            logger.info("✓ Cache loaded successfully")
+            # Load NEW comprehensive data
+            self._load_real_employment_rates()
+            self._load_education_occupation_probabilities()
+            self._load_real_education_distributions()
+            
+            logger.info("✓ Comprehensive cache loaded successfully")
             
         except Exception as e:
             logger.error(f"Cache loading failed: {e}")
-            # Create minimal fallback data
             self._create_fallback_cache()
+
+    def _load_real_employment_rates(self):
+        """Load actual state-specific employment rates from database"""
+        try:
+            # Get employment rates by state
+            self.cursor.execute("""
+                SELECT 
+                    sd.state_code,
+                    sd.state_name,
+                    ses.employment_rate,
+                    ses.unemployment_rate,
+                    ses.labor_force_participation_rate
+                FROM census.state_demographics sd
+                JOIN census.state_employment_stats ses ON sd.id = ses.state_id
+            """)
+            
+            self._cache['state_employment_rates'] = {}
+            for row in self.cursor.fetchall():
+                state_code, state_name, emp_rate, unemp_rate, lfpr = row
+                self._cache['state_employment_rates'][state_code] = {
+                    'employment_rate': float(emp_rate) if emp_rate else 85.0,
+                    'unemployment_rate': float(unemp_rate) if unemp_rate else 5.0,
+                    'labor_force_participation_rate': float(lfpr) if lfpr else 63.0
+                }
+            
+            logger.info(f"✓ Loaded real employment rates for {len(self._cache['state_employment_rates'])} states")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load employment rates: {e}")
+            # Fallback to national averages
+            self._cache['state_employment_rates'] = {}
+
+    def _load_education_occupation_probabilities(self):
+        """Load education-occupation probability matrix from database"""
+        try:
+            # Load state-specific probabilities
+            self.cursor.execute("""
+                SELECT 
+                    el.level_key,
+                    eop.occ_code,
+                    eop.state_code,
+                    eop.probability,
+                    eop.employment_share,
+                    od.occ_title,
+                    od.major_group
+                FROM education.occupation_probabilities eop
+                JOIN education_levels el ON eop.education_level_id = el.id
+                LEFT JOIN oews.occupation_details od ON eop.occ_code = od.occ_code
+                WHERE eop.probability > 0.001  -- Only significant probabilities
+                ORDER BY eop.state_code, el.level_key, eop.probability DESC
+            """)
+            
+            self._cache['education_occupation_probs'] = {}
+            for row in self.cursor.fetchall():
+                education_key, occ_code, state_code, probability, emp_share, occ_title, major_group = row
+                
+                # Create nested structure: state -> education -> occupations
+                if state_code not in self._cache['education_occupation_probs']:
+                    self._cache['education_occupation_probs'][state_code] = {}
+                
+                if education_key not in self._cache['education_occupation_probs'][state_code]:
+                    self._cache['education_occupation_probs'][state_code][education_key] = []
+                
+                self._cache['education_occupation_probs'][state_code][education_key].append({
+                    'occ_code': occ_code,
+                    'probability': float(probability),
+                    'employment_share': float(emp_share) if emp_share else 0,
+                    'title': occ_title,
+                    'major_group': major_group
+                })
+            
+            # Load national fallback probabilities
+            self.cursor.execute("""
+                SELECT 
+                    el.level_key,
+                    eop.occ_code,
+                    eop.probability,
+                    eop.employment_share,
+                    od.occ_title,
+                    od.major_group
+                FROM education.occupation_probabilities eop
+                JOIN education_levels el ON eop.education_level_id = el.id
+                LEFT JOIN oews.occupation_details od ON eop.occ_code = od.occ_code
+                WHERE eop.state_code IS NULL  -- National data
+                  AND eop.probability > 0.001
+                ORDER BY el.level_key, eop.probability DESC
+            """)
+            
+            self._cache['national_education_occupation_probs'] = {}
+            for row in self.cursor.fetchall():
+                education_key, occ_code, probability, emp_share, occ_title, major_group = row
+                
+                if education_key not in self._cache['national_education_occupation_probs']:
+                    self._cache['national_education_occupation_probs'][education_key] = []
+                
+                self._cache['national_education_occupation_probs'][education_key].append({
+                    'occ_code': occ_code,
+                    'probability': float(probability),
+                    'employment_share': float(emp_share) if emp_share else 0,
+                    'title': occ_title,
+                    'major_group': major_group
+                })
+            
+            logger.info(f"✓ Loaded education-occupation probabilities for {len(self._cache['education_occupation_probs'])} states")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load education-occupation probabilities: {e}")
+            self._cache['education_occupation_probs'] = {}
+            self._cache['national_education_occupation_probs'] = {}
+
+    def _load_real_education_distributions(self):
+        """Load actual education attainment by state from database"""
+        try:
+            self.cursor.execute("""
+                SELECT 
+                    ad.state_code,
+                    el.level_key,
+                    ad.percentage
+                FROM education.attainment_demographics ad
+                JOIN education_levels el ON ad.education_level_id = el.id
+                WHERE ad.race_key = 'All' AND ad.age_group = 'All' AND ad.gender = 'All'
+            """)
+            
+            self._cache['state_education_distributions'] = {}
+            for row in self.cursor.fetchall():
+                state_code, education_key, percentage = row
+                
+                if state_code not in self._cache['state_education_distributions']:
+                    self._cache['state_education_distributions'][state_code] = {}
+                
+                self._cache['state_education_distributions'][state_code][education_key] = float(percentage)
+            
+            logger.info(f"✓ Loaded real education distributions for {len(self._cache['state_education_distributions'])} states")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load education distributions: {e}")
+            self._cache['state_education_distributions'] = {}
     
     def _load_states_safely(self):
         """Load state data with error handling"""
@@ -251,7 +396,6 @@ class FixedFamilyGenerator:
                   AND tot_emp IS NOT NULL 
                   AND tot_emp > 1000      -- Only jobs with significant employment
                 ORDER BY tot_emp DESC     -- Prioritize common jobs
-                -- NO ARBITRARY LIMITS!   -- Let database return all good data
             """)
             
             occupations = {}
@@ -297,14 +441,6 @@ class FixedFamilyGenerator:
                 logger.info(f"✅ Loaded wage data for {len(state_wages)} states")
                 logger.info(f"✅ Total employment represented: {total_employment:,}")
                 
-                # Show top occupations by employment
-                top_jobs = sorted(occupations.items(), 
-                                key=lambda x: x[1]['total_employment'], 
-                                reverse=True)[:10]
-                logger.info("📊 Top 10 occupations by employment:")
-                for occ_code, data in top_jobs:
-                    logger.info(f"   {data['title']}: {data['total_employment']:,} jobs, ${data['median_wage']:,.0f} median")
-                
             else:
                 logger.warning("❌ No occupations loaded from database - check data quality")
                 self._create_fallback_occupations()
@@ -312,6 +448,282 @@ class FixedFamilyGenerator:
         except Exception as e:
             logger.error(f"Failed to load occupation data: {e}")
             self._create_fallback_occupations()
+    
+    def _select_occupation_using_probabilities(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
+        """Select occupation using real education-occupation probability matrix"""
+        
+        if age < 16:
+            return None
+        elif 16 <= age <= 18:
+            # Teenagers - use entry-level probabilities but limited to service jobs
+            teen_suitable_groups = ['Food Preparation', 'Sales', 'Personal Care']
+            return self._select_teen_occupation(education_level, state_code, teen_suitable_groups)
+        
+        # Get state-specific probabilities, fallback to national
+        state_probs = self._cache['education_occupation_probs'].get(state_code, {})
+        education_probs = state_probs.get(education_level, [])
+        
+        if not education_probs:
+            # Fallback to national probabilities
+            education_probs = self._cache['national_education_occupation_probs'].get(education_level, [])
+        
+        if not education_probs:
+            return None
+        
+        # Apply employment rate for this education level and state
+        employment_rate = self._get_real_employment_rate(education_level, state_code)
+        
+        if random.random() > employment_rate:
+            return self._generate_unemployment_benefits(age, education_level, state_code)
+        
+        # Select occupation based on probabilities
+        total_prob = sum(occ['probability'] for occ in education_probs)
+        if total_prob <= 0:
+            return None
+        
+        rand_val = random.uniform(0, total_prob)
+        cumulative_prob = 0
+        
+        for occ_data in education_probs:
+            cumulative_prob += occ_data['probability']
+            if rand_val <= cumulative_prob:
+                return self._get_occupation_with_real_wages(occ_data['occ_code'], state_code)
+        
+        # Fallback
+        return self._get_occupation_with_real_wages(education_probs[0]['occ_code'], state_code)
+
+    def _select_teen_occupation(self, education_level: str, state_code: str, suitable_groups: List[str]) -> Optional[Dict[str, Any]]:
+        """Helper method for teen occupation selection"""
+        teen_jobs = []
+        for occ_code, occ_data in self._cache['occupations'].items():
+            if occ_data.get('major_group') in suitable_groups:
+                teen_jobs.append(occ_code)
+        
+        if teen_jobs and random.random() < 0.35:  # 35% teen employment rate
+            occ_code = random.choice(teen_jobs)
+            return self._get_occupation_with_real_wages(occ_code, state_code, part_time=True)
+        return None
+
+    def _get_real_employment_rate(self, education_level: str, state_code: str) -> float:
+        """Get real employment rate for education level and state"""
+        
+        # Get state employment rate
+        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
+        base_employment_rate = state_emp_data.get('employment_rate', 85.0) / 100
+        
+        # Adjust based on education level (education improves employment prospects)
+        education_multipliers = {
+            'less_than_hs': 0.85,  # Below average
+            'high_school': 0.95,   # Near average  
+            'some_college': 1.02,  # Slightly above
+            'bachelors': 1.08,     # Above average
+            'graduate': 1.12       # Well above average
+        }
+        
+        multiplier = education_multipliers.get(education_level, 1.0)
+        adjusted_rate = min(0.98, base_employment_rate * multiplier)  # Cap at 98%
+        
+        return adjusted_rate
+
+    def _select_education_level_using_real_data(self, age: int, state_code: str, race_key: str) -> str:
+        """Select education level using real state demographic data"""
+        
+        if age < 18:
+            return 'less_than_hs'
+        
+        # Get state-specific education distribution
+        state_edu_dist = self._cache['state_education_distributions'].get(state_code, {})
+        
+        if state_edu_dist:
+            # Use real state data
+            education_weights = []
+            education_levels = []
+            
+            for edu_level, percentage in state_edu_dist.items():
+                education_levels.append(edu_level)
+                education_weights.append(percentage)
+            
+            if education_weights and sum(education_weights) > 0:
+                # Age-based adjustments to reflect realistic patterns
+                if 18 <= age <= 24:
+                    # Young adults - boost some_college, reduce graduate
+                    adjusted_weights = []
+                    for i, edu_level in enumerate(education_levels):
+                        weight = education_weights[i]
+                        if edu_level == 'some_college':
+                            weight *= 1.5  # More young people in college
+                        elif edu_level == 'graduate':
+                            weight *= 0.3  # Fewer young graduates
+                        elif edu_level == 'bachelors':
+                            weight *= 0.7  # Some haven't finished yet
+                        adjusted_weights.append(weight)
+                    education_weights = adjusted_weights
+                
+                elif age >= 65:
+                    # Older adults - reflect historical lower education
+                    adjusted_weights = []
+                    for i, edu_level in enumerate(education_levels):
+                        weight = education_weights[i]
+                        if edu_level in ['less_than_hs', 'high_school']:
+                            weight *= 1.3  # Higher historical rates
+                        elif edu_level in ['bachelors', 'graduate']:
+                            weight *= 0.7  # Lower historical rates
+                        adjusted_weights.append(weight)
+                    education_weights = adjusted_weights
+                
+                # Weighted random selection
+                return random.choices(education_levels, weights=education_weights)[0]
+        
+        # Fallback to age-based logic if no state data
+        return self._fallback_education_selection(age)
+
+    def _fallback_education_selection(self, age: int) -> str:
+        """Fallback education selection based on age"""
+        if age < 18:
+            return 'less_than_hs'
+        elif 18 <= age <= 24:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors'],
+                weights=[20, 50, 25, 5]
+            )[0]
+        elif age >= 65:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
+                weights=[30, 40, 15, 12, 3]
+            )[0]
+        else:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
+                weights=[12, 40, 28, 15, 5]
+            )[0]
+
+    def _get_occupation_with_real_wages(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
+        """Get occupation with real wages from OEWS database"""
+        
+        try:
+            # Get real wage data from database
+            self.cursor.execute("""
+                SELECT 
+                    ew.occ_title,
+                    ew.a_median,
+                    ew.a_mean,
+                    ew.tot_emp,
+                    od.major_group,
+                    er.typical_education_level_id,
+                    el.level_key
+                FROM oews.employment_wages ew
+                LEFT JOIN oews.occupation_details od ON ew.occ_code = od.occ_code
+                LEFT JOIN education.occupation_requirements er ON ew.occ_code = er.occ_code
+                LEFT JOIN education_levels el ON er.typical_education_level_id = el.id
+                WHERE ew.occ_code = %s AND ew.state_code = %s
+                ORDER BY ew.year DESC
+                LIMIT 1
+            """, (occ_code, state_code))
+            
+            result = self.cursor.fetchone()
+            
+            if result:
+                occ_title, a_median, a_mean, tot_emp, major_group, edu_level_id, edu_key = result
+                
+                # Use median wage (more realistic)
+                base_wage = float(a_median) if a_median else float(a_mean) if a_mean else 35000
+                
+                # Handle part-time work
+                if part_time:
+                    base_wage = int(base_wage * 0.4)  # ~40% of full-time
+                
+                # Small realistic variation (±10%)
+                annual_income = int(base_wage * random.uniform(0.9, 1.1))
+                
+                return {
+                    'occ_code': occ_code,
+                    'title': occ_title or 'Unknown Occupation',
+                    'major_group': major_group or 'Other',
+                    'education_requirement': edu_key or 'high_school',
+                    'annual_income': max(annual_income, 15000),  # Minimum wage floor
+                    'employment_type': 'Part-time' if part_time else 'Full-time',
+                    'data_source': 'database'
+                }
+        
+        except Exception as e:
+            logger.debug(f"Error getting real wages for {occ_code}: {e}")
+        
+        # Fallback to cache if database query fails
+        return self._get_occupation_details_realistic(occ_code, state_code, part_time)
+
+    def _generate_unemployment_benefits(self, age: int, education_level: str, state_code: str) -> Optional[Dict[str, Any]]:
+        """Generate realistic unemployment benefits based on state and education"""
+        
+        if age < 18:
+            return None
+        elif age >= 67:
+            # Social Security benefits
+            monthly_ss = random.randint(800, 2800)  # Realistic SS range
+            return {
+                'occ_code': 'RETIRED',
+                'title': 'Retired (Social Security)',
+                'major_group': 'Retired',
+                'education_requirement': education_level,
+                'annual_income': monthly_ss * 12,
+                'employment_type': 'Retired',
+                'data_source': 'calculated'
+            }
+        
+        # Get state unemployment rate to determine benefit probability
+        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
+        unemployment_rate = state_emp_data.get('unemployment_rate', 5.0)
+        
+        # Higher unemployment rate = higher chance of getting benefits
+        benefit_probability = min(0.8, unemployment_rate / 10 + 0.4)
+        
+        if random.random() < benefit_probability:
+            # Calculate unemployment benefits based on education level (proxy for prior wages)
+            base_weekly_benefit = {
+                'less_than_hs': 200,
+                'high_school': 280,
+                'some_college': 350,
+                'bachelors': 450,
+                'graduate': 520
+            }.get(education_level, 280)
+            
+            # Add state variation (±20%)
+            state_variation = random.uniform(0.8, 1.2)
+            weekly_benefit = int(base_weekly_benefit * state_variation)
+            
+            # Assume 26 weeks of benefits (typical duration)
+            annual_benefit = weekly_benefit * 26
+            
+            return {
+                'occ_code': 'UNEMPLOYED',
+                'title': 'Unemployed (Receiving Benefits)',
+                'major_group': 'Unemployed',
+                'education_requirement': education_level,
+                'annual_income': annual_benefit,
+                'employment_type': 'Unemployed',
+                'data_source': 'calculated'
+            }
+        else:
+            # Disability or other support
+            monthly_benefit = random.randint(700, 1400)
+            return {
+                'occ_code': 'DISABLED',
+                'title': 'Receiving Disability Benefits',
+                'major_group': 'Disabled',
+                'education_requirement': education_level,
+                'annual_income': monthly_benefit * 12,
+                'employment_type': 'Disabled',
+                'data_source': 'calculated'
+            }
+
+    # Updated main occupation selection method to use the new probability-based approach:
+    def _select_occupation(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
+        """Enhanced occupation selection using real database probabilities"""
+        return self._select_occupation_using_probabilities(education_level, age, state_code)
+
+    # Updated education level selection to use real data:
+    def _select_education_level(self, age: int, state_code: str, race_key: str) -> str:
+        """Enhanced education selection using real state data"""
+        return self._select_education_level_using_real_data(age, state_code, race_key)
     
     def _create_fallback_occupations(self):
         """Create fallback occupations with realistic wages based on actual employment data"""
@@ -339,38 +751,6 @@ class FixedFamilyGenerator:
                 'title': 'Laborers and Freight Movers', 'major_group': 'Transportation', 'education_level': 'less_than_hs',
                 'median_wage': 32000, 'total_employment': 2500000, 'employment_weight': 0.063
             },
-            '37-2011': {  # Janitors - 2.1 million employed, $30k median
-                'title': 'Janitors and Cleaners', 'major_group': 'Maintenance', 'education_level': 'less_than_hs',
-                'median_wage': 30000, 'total_employment': 2100000, 'employment_weight': 0.053
-            },
-            '43-9061': {  # Office Clerks - 2.3 million employed, $36k median
-                'title': 'Office Clerks, General', 'major_group': 'Office Support', 'education_level': 'high_school',
-                'median_wage': 36000, 'total_employment': 2300000, 'employment_weight': 0.058
-            },
-            '35-2014': {  # Cooks - 1.2 million employed, $28k median
-                'title': 'Cooks, Restaurant', 'major_group': 'Food Service', 'education_level': 'less_than_hs',
-                'median_wage': 28000, 'total_employment': 1200000, 'employment_weight': 0.03
-            },
-            '35-9021': {  # Dishwashers - 400k employed, $25k median
-                'title': 'Dishwashers', 'major_group': 'Food Service', 'education_level': 'less_than_hs',
-                'median_wage': 25000, 'total_employment': 400000, 'employment_weight': 0.01
-            },
-            '53-3032': {  # Truck Drivers - 2.0 million employed, $47k median
-                'title': 'Heavy Truck Drivers', 'major_group': 'Transportation', 'education_level': 'high_school',
-                'median_wage': 47000, 'total_employment': 2000000, 'employment_weight': 0.05
-            },
-            '31-1014': {  # Nursing Assistants - 1.3 million employed, $33k median
-                'title': 'Nursing Assistants', 'major_group': 'Healthcare Support', 'education_level': 'some_college',
-                'median_wage': 33000, 'total_employment': 1300000, 'employment_weight': 0.033
-            },
-            '33-9032': {  # Security Guards - 1.1 million employed, $34k median
-                'title': 'Security Guards', 'major_group': 'Protective Service', 'education_level': 'high_school',
-                'median_wage': 34000, 'total_employment': 1100000, 'employment_weight': 0.028
-            },
-            '39-9021': {  # Personal Care Aides - 1.4 million employed, $29k median
-                'title': 'Personal Care Aides', 'major_group': 'Personal Care', 'education_level': 'less_than_hs',
-                'median_wage': 29000, 'total_employment': 1400000, 'employment_weight': 0.035
-            },
             '29-1141': {  # Registered Nurses - 3.2 million employed, $75k median
                 'title': 'Registered Nurses', 'major_group': 'Healthcare', 'education_level': 'bachelors',
                 'median_wage': 75000, 'total_employment': 3200000, 'employment_weight': 0.08
@@ -382,10 +762,6 @@ class FixedFamilyGenerator:
             '15-1211': {  # Computer Analysts - 600k employed, $95k median
                 'title': 'Computer Systems Analysts', 'major_group': 'Computer', 'education_level': 'bachelors',
                 'median_wage': 95000, 'total_employment': 600000, 'employment_weight': 0.015
-            },
-            '11-1021': {  # General Managers - 350k employed, $85k median
-                'title': 'General and Operations Managers', 'major_group': 'Management', 'education_level': 'bachelors',
-                'median_wage': 85000, 'total_employment': 350000, 'employment_weight': 0.009
             }
         }
         
@@ -481,7 +857,10 @@ class FixedFamilyGenerator:
             'state_occupation_wages': {},
             'state_education_attainment': {},
             'state_education_occupation_probs': {},
-            'national_education_occupation_probs': {}
+            'national_education_occupation_probs': {},
+            'state_employment_rates': {},
+            'education_occupation_probs': {},
+            'state_education_distributions': {}
         }
         
         # Fill in basic data for each state
@@ -580,128 +959,6 @@ class FixedFamilyGenerator:
         structure_name = state_structures.get(structure_key, {}).get('name', structure_key.replace('_', ' ').title())
         
         return {'structure_key': structure_key, 'structure_name': structure_name}
-    
-    def _select_education_level(self, age: int, state_code: str, race_key: str) -> str:
-        """Select education level with more realistic distribution"""
-        
-        if age < 18:
-            return 'less_than_hs'  # Still in school
-        elif 18 <= age <= 24:
-            # Young adults - many still working on education
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors'],
-                weights=[20, 50, 25, 5]  # Most have HS, fewer college grads
-            )[0]
-        elif age >= 65:
-            # Older adults - historically lower education levels
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
-                weights=[30, 40, 15, 12, 3]  # Much lower college rates historically
-            )[0]
-        else:
-            # Working age adults - closer to actual US distribution
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
-                weights=[12, 40, 28, 15, 5]  # Based on actual census data
-            )[0]
-    
-    def _select_occupation(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
-        """Select occupation using employment-weighted probability from real data"""
-        
-        if age < 16:
-            return None
-        elif 16 <= age <= 18:
-            # Teenagers - focus on entry-level service jobs
-            teen_jobs = ['35-3021', '41-2011', '35-2014', '35-9021']  # Food service, cashier, etc.
-            available_teen_jobs = [job for job in teen_jobs if job in self._cache['occupations']]
-            
-            if available_teen_jobs and random.random() < 0.35:  # 35% teen employment rate
-                occ_code = random.choice(available_teen_jobs)
-                return self._get_occupation_details_realistic(occ_code, state_code, part_time=True)
-            return None
-        
-        # Filter occupations by education requirements
-        suitable_occupations = []
-        education_levels = ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate']
-        current_level = education_levels.index(education_level) if education_level in education_levels else 1
-        
-        for occ_code, occ_data in self._cache['occupations'].items():
-            occ_education = occ_data.get('education_level', 'high_school')
-            if occ_education in education_levels:
-                occ_level = education_levels.index(occ_education)
-                
-                # Can work in jobs requiring same or lower education
-                if occ_level <= current_level:
-                    # Use actual employment weight from database
-                    weight = occ_data.get('employment_weight', 0.001)
-                    
-                    # Boost weight for exact education matches
-                    if occ_education == education_level:
-                        weight *= 1.5
-                    
-                    suitable_occupations.append((occ_code, weight))
-        
-        if not suitable_occupations:
-            return None
-        
-        # Apply realistic employment rates by education
-        employment_rates = {
-            'less_than_hs': 0.50,
-            'high_school': 0.68, 
-            'some_college': 0.72,
-            'bachelors': 0.78,
-            'graduate': 0.82
-        }
-        
-        if random.random() > employment_rates.get(education_level, 0.68):
-            return None  # Unemployed
-        
-        # Employment-weighted selection using real data
-        total_weight = sum(weight for _, weight in suitable_occupations)
-        if total_weight <= 0:
-            return None
-        
-        rand_val = random.uniform(0, total_weight)
-        cumulative_weight = 0
-        
-        for occ_code, weight in suitable_occupations:
-            cumulative_weight += weight
-            if rand_val <= cumulative_weight:
-                return self._get_occupation_details_realistic(occ_code, state_code)
-        
-        # Fallback
-        occ_code = random.choice([code for code, _ in suitable_occupations])
-        return self._get_occupation_details_realistic(occ_code, state_code)
-    
-    def _get_occupation_details_realistic(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
-        """Get occupation details using real database wages"""
-        
-        occ_details = self._cache['occupations'].get(occ_code, {})
-        state_wages = self._cache['state_occupation_wages'].get(state_code, {}).get(occ_code, {})
-        
-        # Use actual database wages (prefer median over mean)
-        if state_wages and state_wages.get('annual_median'):
-            base_income = state_wages['annual_median']
-        elif occ_details.get('median_wage'):
-            base_income = occ_details['median_wage']
-        else:
-            base_income = 35000  # Last resort fallback
-        
-        # Handle part-time work (mainly for teenagers)
-        if part_time:
-            base_income = int(base_income * 0.4)  # ~40% of full-time
-        
-        # Small realistic variation (±12%)
-        annual_income = int(base_income * random.uniform(0.88, 1.12))
-        
-        return {
-            'occ_code': occ_code,
-            'title': occ_details.get('title', 'Unknown Occupation'),
-            'major_group': occ_details.get('major_group', 'Other'),
-            'education_requirement': occ_details.get('education_level', 'high_school'),
-            'annual_income': max(annual_income, 15000),  # Minimum wage floor
-            'employment_type': 'Part-time' if part_time else 'Full-time'
-        }
     
     def _generate_age(self, role: str, context: Dict = None) -> int:
         """Generate realistic age based on role and context"""
@@ -911,6 +1168,36 @@ class FixedFamilyGenerator:
                 highest_level = member_education
         
         return highest_level
+
+    def _get_occupation_details_realistic(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
+        """Fallback method for getting occupation details using cache"""
+        
+        occ_details = self._cache['occupations'].get(occ_code, {})
+        state_wages = self._cache['state_occupation_wages'].get(state_code, {}).get(occ_code, {})
+        
+        # Use actual database wages (prefer median over mean)
+        if state_wages and state_wages.get('annual_median'):
+            base_income = state_wages['annual_median']
+        elif occ_details.get('median_wage'):
+            base_income = occ_details['median_wage']
+        else:
+            base_income = 35000  # Last resort fallback
+        
+        # Handle part-time work (mainly for teenagers)
+        if part_time:
+            base_income = int(base_income * 0.4)  # ~40% of full-time
+        
+        # Small realistic variation (±12%)
+        annual_income = int(base_income * random.uniform(0.88, 1.12))
+        
+        return {
+            'occ_code': occ_code,
+            'title': occ_details.get('title', 'Unknown Occupation'),
+            'major_group': occ_details.get('major_group', 'Other'),
+            'education_requirement': occ_details.get('education_level', 'high_school'),
+            'annual_income': max(annual_income, 15000),  # Minimum wage floor
+            'employment_type': 'Part-time' if part_time else 'Full-time'
+        }
     
     def generate_family(self, target_state: str = None) -> Dict[str, Any]:
         """Generate a complete family"""
@@ -947,7 +1234,7 @@ class FixedFamilyGenerator:
                 "highest_education_level": self._get_highest_education_level(members),
                 "total_earners": sum(1 for member in members if member.get('annual_income', 0) > 0),
                 "generation_date": datetime.now().isoformat(),
-                "data_version": "fixed_v2",
+                "data_version": "enhanced_v1",
                 "members": members
             }
             
@@ -959,20 +1246,26 @@ class FixedFamilyGenerator:
         """Generate multiple families"""
         families = []
         
-        logger.info(f"Generating {count} families...")
+        logger.info(f"🏠 Starting generation of {count} families with enhanced database integration...")
+        if target_state:
+            logger.info(f"🎯 Target state: {target_state}")
         
         for i in range(count):
             try:
+                logger.debug(f"Generating family {i + 1}/{count}...")
                 family = self.generate_family(target_state)
                 families.append(family)
                 
-                if (i + 1) % 5 == 0 or i == count - 1:
-                    logger.info(f"  Generated {i + 1}/{count} families")
+                # More frequent progress updates for debugging
+                if (i + 1) % 1 == 0 or i == count - 1:
+                    logger.info(f"  ✅ Generated {i + 1}/{count} families")
                     
             except Exception as e:
-                logger.warning(f"Failed to generate family {i + 1}: {e}")
+                logger.warning(f"❌ Failed to generate family {i + 1}: {e}")
+                logger.debug(f"Full error: {e}", exc_info=True)
                 continue
         
+        logger.info(f"🎉 Completed generation: {len(families)} families successfully created")
         return families
     
     def print_family_summary(self, families: List[Dict]):
@@ -981,7 +1274,7 @@ class FixedFamilyGenerator:
             logger.info("No families to summarize")
             return
         
-        logger.info(f"\n=== FAMILY GENERATION SUMMARY ===")
+        logger.info(f"\n=== ENHANCED FAMILY GENERATION SUMMARY ===")
         logger.info(f"Total families generated: {len(families)}")
         
         # Income statistics
@@ -992,10 +1285,12 @@ class FixedFamilyGenerator:
             logger.info(f"Average household income: ${avg_income:,.0f}")
             logger.info(f"Median household income: ${median_income:,.0f}")
         
-        # Show sample families
-        logger.info(f"\nSample families:")
-        for i, family in enumerate(families[:3]):
-            logger.info(f"\nFamily {i + 1}:")
+        # Show families (all if 10 or fewer, otherwise first 10)
+        display_count = min(len(families), 10)
+        logger.info(f"\nShowing {display_count} of {len(families)} families:")
+        
+        for i, family in enumerate(families[:display_count]):
+            logger.info(f"\nFamily {i + 1} (ID: {family['family_id']}):")
             logger.info(f"  Location: {family['state_name']}")
             logger.info(f"  Type: {family['family_type']}")
             logger.info(f"  Size: {family['family_size']} members")
@@ -1006,6 +1301,15 @@ class FixedFamilyGenerator:
                 income = member.get('annual_income', 0)
                 income_str = f", ${income:,}" if income > 0 else ""
                 logger.info(f"    {member['role']}: Age {member['age']}, {member['education_level']}, {occupation}{income_str}")
+        
+        if len(families) > 10:
+            logger.info(f"\n... and {len(families) - 10} more families")
+        
+        logger.info(f"\n📊 QUICK STATS:")
+        logger.info(f"Family types: {set(f['family_type'] for f in families)}")
+        logger.info(f"Income range: ${min(incomes):,} - ${max(incomes):,}")
+        logger.info(f"Average family size: {sum(f['family_size'] for f in families) / len(families):.1f}")
+        logger.info(f"Data version: enhanced_v1 (with real database integration)")
     
     def close(self):
         """Close database connection"""
@@ -1017,28 +1321,28 @@ class FixedFamilyGenerator:
 def main():
     """Main execution function"""
     
-    # Parse command line arguments
-    count = 5
-    target_state = None
+    import argparse
     
-    i = 1
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--count' and i + 1 < len(sys.argv):
-            count = int(sys.argv[i + 1])
-            i += 2
-        elif arg == '--state' and i + 1 < len(sys.argv):
-            target_state = sys.argv[i + 1]
-            i += 2
-        else:
-            i += 1
+    # Parse command line arguments with argparse
+    parser = argparse.ArgumentParser(description='Generate realistic synthetic families with enhanced database integration')
+    parser.add_argument('--count', type=int, default=5, 
+                       help='Number of families to generate (default: 5)')
+    parser.add_argument('--state', type=str, default=None,
+                       help='Target state (e.g., California, Texas)')
+    
+    args = parser.parse_args()
+    count = args.count
+    target_state = args.state
+    
+    # Debug logging
+    logger.info(f"🎯 Parsed arguments: count={count}, state={target_state}")
     
     try:
-        logger.info("🏠 FIXED FAMILY GENERATOR v2")
+        logger.info("🏠 ENHANCED FAMILY GENERATOR v1")
         logger.info("="*40)
         
         # Initialize generator
-        generator = FixedFamilyGenerator()
+        generator = EnhancedFamilyGenerator()
         
         # Generate families
         families = generator.generate_families(count, target_state)
@@ -1046,7 +1350,7 @@ def main():
         # Print results
         generator.print_family_summary(families)
         
-        logger.info(f"\n✅ Successfully generated {len(families)} families!")
+        logger.info(f"\n✅ Successfully generated {len(families)} families with enhanced database integration!")
         
         generator.close()
         return True
