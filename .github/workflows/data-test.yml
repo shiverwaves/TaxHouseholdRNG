@@ -237,9 +237,9 @@ jobs:
                 percentage = (count / len(families)) * 100
                 print(f'   {bracket}: {count} ({percentage:.1f}%)')
             
-            # Sample families
-            print('\\n👥 SAMPLE FAMILIES:')
-            for i, family in enumerate(families[:5]):
+            # All families
+            print('\\n👥 ALL GENERATED FAMILIES:')
+            for i, family in enumerate(families):
                 print(f'\\n   Family {i+1} ({family.get(\"family_id\", \"Unknown\")}):')
                 print(f'      📍 Location: {family.get(\"state_name\", \"Unknown\")}')
                 print(f'      🏠 Type: {family.get(\"family_type\", \"Unknown\")}')
@@ -261,7 +261,7 @@ jobs:
         "
     
     - name: Upload Generated Families
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: generated-families
         path: families.json
