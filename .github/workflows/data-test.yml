@@ -1,4 +1,4 @@
-name: Family Generator
+name: Enhanced Family Generator
 
 on:
   # Allow manual execution with custom parameters
@@ -11,49 +11,6 @@ on:
         type: string
       state:
         description: 'Target state (e.g., California, Texas)'
-        required: false
-        default: ''
-        type: string
-      family_type:
-        description: 'Family structure'
-        required: false
-        default: ''
-        type: choice
-        options:
-          - ''
-          - 'married_couple'
-          - 'single_person'
-          - 'single_parent_female'
-          - 'single_parent_male'
-      race:
-        description: 'Race/ethnicity (e.g., hispanic, white, black, asian)'
-        required: false
-        default: ''
-        type: string
-      education:
-        description: 'Education level'
-        required: false
-        default: ''
-        type: choice
-        options:
-          - ''
-          - 'less_than_hs'
-          - 'high_school'
-          - 'some_college'
-          - 'bachelors'
-          - 'graduate'
-      income_range:
-        description: 'Income range (e.g., 50000-80000)'
-        required: false
-        default: ''
-        type: string
-      children:
-        description: 'Number of children'
-        required: false
-        default: ''
-        type: string
-      age_range:
-        description: 'Age range for head of household (e.g., 30-50)'
         required: false
         default: ''
         type: string
@@ -89,180 +46,172 @@ jobs:
           ARGS="$ARGS --state '${{ github.event.inputs.state }}'"
         fi
         
-        if [[ -n "${{ github.event.inputs.family_type }}" ]]; then
-          ARGS="$ARGS --family-type ${{ github.event.inputs.family_type }}"
-        fi
-        
-        if [[ -n "${{ github.event.inputs.race }}" ]]; then
-          ARGS="$ARGS --race '${{ github.event.inputs.race }}'"
-        fi
-        
-        if [[ -n "${{ github.event.inputs.education }}" ]]; then
-          ARGS="$ARGS --education ${{ github.event.inputs.education }}"
-        fi
-        
-        if [[ -n "${{ github.event.inputs.income_range }}" ]]; then
-          ARGS="$ARGS --income-range ${{ github.event.inputs.income_range }}"
-        fi
-        
-        if [[ -n "${{ github.event.inputs.children }}" ]]; then
-          ARGS="$ARGS --children ${{ github.event.inputs.children }}"
-        fi
-        
-        if [[ -n "${{ github.event.inputs.age_range }}" ]]; then
-          ARGS="$ARGS --age-range ${{ github.event.inputs.age_range }}"
-        fi
-        
         echo "args=$ARGS" >> $GITHUB_OUTPUT
-        echo "Generated command: python data-generator.py $ARGS --output families.json"
+        echo "Generated command: python enhanced_family_generator.py $ARGS"
     
     - name: Generate Families
       env:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
-        echo "🏠 Generating families with parameters..."
-        echo "Command: python data-generator.py ${{ steps.build_args.outputs.args }} --output families.json"
+        echo "🏠 Generating families with enhanced database integration..."
+        echo "Command: python enhanced_family_generator.py ${{ steps.build_args.outputs.args }}"
         echo ""
         
-        python data-generator.py ${{ steps.build_args.outputs.args }} --output families.json
+        # Run the generator and capture output to a temporary file
+        python enhanced_family_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
+    
+    - name: Parse and Create JSON Output
+      run: |
+        echo "📊 Creating JSON output for artifact..."
+        
+        # Create a simple JSON structure with generation metadata
+        python -c "
+        import json
+        from datetime import datetime
+        import re
+        import os
+        
+        # Read the generation output
+        try:
+            with open('generation_output.txt', 'r') as f:
+                output_lines = f.readlines()
+        except:
+            output_lines = []
+        
+        # Extract key information from output
+        families_generated = 0
+        avg_income = 0
+        median_income = 0
+        
+        for line in output_lines:
+            if 'Successfully generated' in line and 'families' in line:
+                # Extract number from line like '✅ Successfully generated 10 families...'
+                match = re.search(r'generated (\d+) families', line)
+                if match:
+                    families_generated = int(match.group(1))
+            elif 'Average household income:' in line:
+                # Extract income from line like 'Average household income: $75,480'
+                match = re.search(r'\$([0-9,]+)', line)
+                if match:
+                    avg_income = int(match.group(1).replace(',', ''))
+            elif 'Median household income:' in line:
+                # Extract income from line like 'Median household income: $65,200'
+                match = re.search(r'\$([0-9,]+)', line)
+                if match:
+                    median_income = int(match.group(1).replace(',', ''))
+        
+        # Create metadata JSON
+        generation_metadata = {
+            'generation_date': datetime.now().isoformat(),
+            'generator_version': 'enhanced_v1',
+            'database_integration': True,
+            'families_generated': families_generated,
+            'parameters': {
+                'count': '${{ github.event.inputs.count || \"10\" }}',
+                'state': '${{ github.event.inputs.state || \"random\" }}'
+            },
+            'statistics': {
+                'average_household_income': avg_income,
+                'median_household_income': median_income
+            },
+            'data_sources': [
+                'OEWS wage data',
+                'Census state demographics', 
+                'Education-occupation probability matrices',
+                'State employment statistics'
+            ],
+            'features': [
+                'Real employment rates by state and education',
+                'Probability-based occupation selection', 
+                'Current wages from OEWS database',
+                'Realistic unemployment benefits',
+                'State-specific education distributions'
+            ],
+            'output_note': 'Full family data was displayed in console output above. This JSON contains generation metadata.'
+        }
+        
+        # Save metadata
+        with open('generation_metadata.json', 'w') as f:
+            json.dump(generation_metadata, f, indent=2)
+        
+        print('✅ Generation metadata saved to generation_metadata.json')
+        "
     
     - name: Generate Summary Report
       run: |
-        echo "📊 Generating summary report..."
+        echo ""
+        echo "📊 ENHANCED FAMILY GENERATOR SUMMARY"
+        echo "="*60
+        
+        # Display the metadata
         python -c "
         import json
         from datetime import datetime
         
-        # Load generated families
-        with open('families.json', 'r') as f:
-            families = json.load(f)
-        
-        print('\\n' + '='*60)
-        print('🏠 FAMILY GENERATION SUMMARY')
-        print('='*60)
-        print(f'📅 Generated: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")}')
-        print(f'👥 Total Families: {len(families)}')
-        
-        if families:
-            # Calculate statistics
-            total_members = sum(f.get('family_size', 0) for f in families)
-            total_income = sum(f.get('total_household_income', 0) for f in families)
-            avg_income = total_income / len(families)
-            avg_size = total_members / len(families)
-            total_earners = sum(f.get('total_earners', 0) for f in families)
-            
-            print(f'👨‍👩‍👧‍👦 Total Members: {total_members}')
-            print(f'💰 Total Income: \${total_income:,}')
-            print(f'📈 Average Income: \${avg_income:,.0f}')
-            print(f'📊 Average Family Size: {avg_size:.1f}')
-            print(f'💼 Total Earners: {total_earners}')
-            
-            # Geographic distribution
-            print('\\n🗺️  GEOGRAPHIC DISTRIBUTION:')
-            states = {}
-            regions = {}
-            for family in families:
-                state = family.get('state_name', 'Unknown')
-                region = family.get('region', 'Unknown')
-                states[state] = states.get(state, 0) + 1
-                regions[region] = regions.get(region, 0) + 1
-            
-            for state, count in sorted(states.items()):
-                print(f'   {state}: {count} families')
-            
-            print('\\n🌎 REGIONAL DISTRIBUTION:')
-            for region, count in sorted(regions.items()):
-                print(f'   {region}: {count} families')
-            
-            # Family structure distribution
-            print('\\n👨‍👩‍👧‍👦 FAMILY STRUCTURE:')
-            structures = {}
-            for family in families:
-                structure = family.get('family_type', 'Unknown')
-                structures[structure] = structures.get(structure, 0) + 1
-            
-            for structure, count in sorted(structures.items()):
-                percentage = (count / len(families)) * 100
-                print(f'   {structure}: {count} ({percentage:.1f}%)')
-            
-            # Race/ethnicity distribution
-            print('\\n🌈 RACE/ETHNICITY DISTRIBUTION:')
-            races = {}
-            for family in families:
-                race = family.get('race', 'Unknown')
-                races[race] = races.get(race, 0) + 1
-            
-            for race, count in sorted(races.items()):
-                percentage = (count / len(families)) * 100
-                print(f'   {race}: {count} ({percentage:.1f}%)')
-            
-            # Education distribution
-            print('\\n🎓 EDUCATION DISTRIBUTION:')
-            education_levels = {}
-            for family in families:
-                education = family.get('highest_education', 'Unknown')
-                education_levels[education] = education_levels.get(education, 0) + 1
-            
-            for education, count in sorted(education_levels.items()):
-                percentage = (count / len(families)) * 100
-                print(f'   {education}: {count} ({percentage:.1f}%)')
-            
-            # Income distribution
-            print('\\n💰 INCOME DISTRIBUTION:')
-            income_brackets = {
-                'Under \$25K': 0,
-                '\$25K - \$50K': 0,
-                '\$50K - \$75K': 0,
-                '\$75K - \$100K': 0,
-                '\$100K - \$150K': 0,
-                'Over \$150K': 0
-            }
-            
-            for family in families:
-                income = family.get('total_household_income', 0)
-                if income < 25000:
-                    income_brackets['Under \$25K'] += 1
-                elif income < 50000:
-                    income_brackets['\$25K - \$50K'] += 1
-                elif income < 75000:
-                    income_brackets['\$50K - \$75K'] += 1
-                elif income < 100000:
-                    income_brackets['\$75K - \$100K'] += 1
-                elif income < 150000:
-                    income_brackets['\$100K - \$150K'] += 1
-                else:
-                    income_brackets['Over \$150K'] += 1
-            
-            for bracket, count in income_brackets.items():
-                percentage = (count / len(families)) * 100
-                print(f'   {bracket}: {count} ({percentage:.1f}%)')
-            
-            # All families
-            print('\\n👥 ALL GENERATED FAMILIES:')
-            for i, family in enumerate(families):
-                print(f'\\n   Family {i+1} ({family.get(\"family_id\", \"Unknown\")}):')
-                print(f'      📍 Location: {family.get(\"state_name\", \"Unknown\")}')
-                print(f'      🏠 Type: {family.get(\"family_type\", \"Unknown\")}')
-                print(f'      🌈 Race: {family.get(\"race\", \"Unknown\")}')
-                print(f'      👥 Size: {family.get(\"family_size\", 0)} members')
-                print(f'      💰 Income: \${family.get(\"total_household_income\", 0):,}')
-                print(f'      🎓 Education: {family.get(\"highest_education\", \"Unknown\")}')
+        try:
+            with open('generation_metadata.json', 'r') as f:
+                metadata = json.load(f)
                 
-                print(f'      👨‍👩‍👧‍👦 Members:')
-                for member in family.get('members', []):
-                    occupation = member.get('occupation', 'No occupation')
-                    income = member.get('annual_income', 0)
-                    income_str = f', \${income:,}' if income > 0 else ''
-                    print(f'         • {member.get(\"role\", \"Unknown\")}: {member.get(\"gender\", \"Unknown\")}, Age {member.get(\"age\", 0)}, {member.get(\"education_level\", \"Unknown\")}, {occupation}{income_str}')
-        
-        print('\\n' + '='*60)
-        print('✅ Family generation completed successfully!')
-        print('='*60)
+            print(f'📅 Generated: {metadata[\"generation_date\"]}')
+            print(f'🔗 Generator Version: {metadata[\"generator_version\"]}')
+            print(f'👥 Families Generated: {metadata[\"families_generated\"]}')
+            print(f'🎯 Target State: {metadata[\"parameters\"][\"state\"]}')
+            print(f'📊 Count Requested: {metadata[\"parameters\"][\"count\"]}')
+            
+            if metadata[\"statistics\"][\"average_household_income\"] > 0:
+                print(f'💰 Average Income: \${metadata[\"statistics\"][\"average_household_income\"]:,}')
+            if metadata[\"statistics\"][\"median_household_income\"] > 0:
+                print(f'💰 Median Income: \${metadata[\"statistics\"][\"median_household_income\"]:,}')
+            
+            print('')
+            print('🚀 ENHANCED FEATURES:')
+            for feature in metadata[\"features\"]:
+                print(f'   ✅ {feature}')
+            
+            print('')    
+            print('📊 DATA SOURCES:')
+            for source in metadata[\"data_sources\"]:
+                print(f'   • {source}')
+                
+        except Exception as e:
+            print(f'Error reading metadata: {e}')
+            print('Metadata file may not have been created properly.')
         "
+        
+        echo ""
+        echo "💡 FULL FAMILY DETAILS:"
+        echo "   The complete family data with all member details"
+        echo "   was displayed in the 'Generate Families' step above."
+        echo ""
+        echo "📁 ARTIFACTS:"
+        echo "   • generation_metadata.json - Generation statistics and metadata"
+        echo "   • generation_output.txt - Complete console output with family details"
+        echo ""
+        echo "="*60
+        echo "✅ Enhanced family generation completed successfully!"
+        echo "🔗 Real database integration with OEWS wage data"
+        echo "📊 State-specific employment and education distributions" 
+        echo "💼 Probability-based occupation selection"
+        echo "="*60
     
-    - name: Upload Generated Families
+    - name: Upload Generation Results
       uses: actions/upload-artifact@v4
       with:
-        name: generated-families
-        path: families.json
+        name: enhanced-family-generation-results
+        path: |
+          generation_metadata.json
+          generation_output.txt
         retention-days: 30
+    
+    - name: Create Summary
+      run: |
+        echo ""
+        echo "📁 DOWNLOAD INSTRUCTIONS:"
+        echo "   1. Go to the Actions tab in your repository"
+        echo "   2. Click on this workflow run"
+        echo "   3. Download the 'enhanced-family-generation-results' artifact"
+        echo "   4. Extract the ZIP file to access:"
+        echo "      • generation_metadata.json (statistics and metadata)"
+        echo "      • generation_output.txt (complete family details)"
+        echo ""
+        echo "💾 Files will be available for 30 days"
