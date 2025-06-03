@@ -78,7 +78,7 @@ jobs:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🧪 Testing basic random family generation..."
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '5' }} \
           --output test_results/basic_random_families.json
     
@@ -87,12 +87,12 @@ jobs:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🧪 Testing state-specific families..."
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --state ${{ github.event.inputs.custom_state || 'California' }} \
           --output test_results/california_families.json
         
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --state Texas \
           --output test_results/texas_families.json
@@ -104,21 +104,21 @@ jobs:
         echo "🧪 Testing different family structures..."
         
         # Married couples with children
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --family-type married_couple \
           --children 2 \
           --output test_results/married_couples_with_kids.json
         
         # Single parent families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --family-type single_parent_female \
           --children 1 \
           --output test_results/single_mothers.json
         
         # Single person households
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --family-type single_person \
           --age-range 25-35 \
@@ -131,21 +131,21 @@ jobs:
         echo "🧪 Testing demographic variations..."
         
         # Hispanic families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --race hispanic \
           --state California \
           --output test_results/hispanic_families.json
         
         # High education families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --education bachelors \
           --income-range 60000-120000 \
           --output test_results/college_educated_families.json
         
         # Working class families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --education high_school \
           --income-range 30000-55000 \
@@ -158,20 +158,20 @@ jobs:
         echo "🧪 Testing income-based scenarios..."
         
         # Low-income families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --income-range 20000-40000 \
           --output test_results/low_income_families.json
         
         # Middle-class families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --income-range 50000-90000 \
           --family-type married_couple \
           --output test_results/middle_class_families.json
         
         # High-income families
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '3' }} \
           --income-range 100000-200000 \
           --education graduate \
@@ -183,7 +183,7 @@ jobs:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🧪 Testing custom parameters..."
-        python generator.py.py \
+        python generator.py \
           --count ${{ github.event.inputs.test_count || '5' }} \
           ${{ github.event.inputs.custom_params }} \
           --output test_results/custom_families.json
@@ -194,7 +194,7 @@ jobs:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🧪 Running performance test..."
-        time python generator.py.py \
+        time python generator.py \
           --count 100 \
           --output test_results/performance_test_families.json
     
@@ -202,7 +202,7 @@ jobs:
       run: |
         echo "🧪 Testing database fallback (no connection)..."
         # Run without database connection to test fallback data
-        python generator.py.py \
+        python generator.py \
           --count 3 \
           --output test_results/fallback_test_families.json
     
@@ -457,7 +457,7 @@ jobs:
     - name: Test without database connection
       run: |
         echo "🧪 Testing fallback data functionality..."
-        python generator.py.py \
+        python generator.py \
           --count 10 \
           --state California \
           --family-type married_couple \
