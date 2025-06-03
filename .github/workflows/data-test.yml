@@ -1,7 +1,6 @@
 name: Enhanced Family Generator
 
 on:
-  # Allow manual execution with custom parameters
   workflow_dispatch:
     inputs:
       count:
@@ -15,7 +14,6 @@ on:
         default: ''
         type: string
 
-  # Run on push to main (with default parameters)
   push:
     branches: [ main ]
 
@@ -57,19 +55,16 @@ jobs:
         echo "Command: python enhanced_family_generator.py ${{ steps.build_args.outputs.args }}"
         echo ""
         
-        # Run the generator and capture output to a temporary file
         python enhanced_family_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
     
     - name: Parse and Create JSON Output
       run: |
         echo "📊 Creating JSON output for artifact..."
         
-        # Create a simple JSON structure with generation metadata
         python -c "
         import json
-        from datetime import datetime
         import re
-        import os
+        from datetime import datetime
         
         # Read the generation output
         try:
@@ -85,18 +80,15 @@ jobs:
         
         for line in output_lines:
             if 'Successfully generated' in line and 'families' in line:
-                # Extract number from line like '✅ Successfully generated 10 families...'
                 match = re.search(r'generated (\d+) families', line)
                 if match:
                     families_generated = int(match.group(1))
             elif 'Average household income:' in line:
-                # Extract income from line like 'Average household income: $75,480'
-                match = re.search(r'\$([0-9,]+)', line)
+                match = re.search(r'\\\$([0-9,]+)', line)
                 if match:
                     avg_income = int(match.group(1).replace(',', ''))
             elif 'Median household income:' in line:
-                # Extract income from line like 'Median household income: $65,200'
-                match = re.search(r'\$([0-9,]+)', line)
+                match = re.search(r'\\\$([0-9,]+)', line)
                 if match:
                     median_income = int(match.group(1).replace(',', ''))
         
@@ -126,8 +118,7 @@ jobs:
                 'Current wages from OEWS database',
                 'Realistic unemployment benefits',
                 'State-specific education distributions'
-            ],
-            'output_note': 'Full family data was displayed in console output above. This JSON contains generation metadata.'
+            ]
         }
         
         # Save metadata
@@ -141,12 +132,10 @@ jobs:
       run: |
         echo ""
         echo "📊 ENHANCED FAMILY GENERATOR SUMMARY"
-        echo "="*60
+        echo "============================================================"
         
-        # Display the metadata
         python -c "
         import json
-        from datetime import datetime
         
         try:
             with open('generation_metadata.json', 'r') as f:
@@ -159,9 +148,9 @@ jobs:
             print(f'📊 Count Requested: {metadata[\"parameters\"][\"count\"]}')
             
             if metadata[\"statistics\"][\"average_household_income\"] > 0:
-                print(f'💰 Average Income: \${metadata[\"statistics\"][\"average_household_income\"]:,}')
+                print(f'💰 Average Income: \\\${metadata[\"statistics\"][\"average_household_income\"]:,}')
             if metadata[\"statistics\"][\"median_household_income\"] > 0:
-                print(f'💰 Median Income: \${metadata[\"statistics\"][\"median_household_income\"]:,}')
+                print(f'💰 Median Income: \\\${metadata[\"statistics\"][\"median_household_income\"]:,}')
             
             print('')
             print('🚀 ENHANCED FEATURES:')
@@ -175,7 +164,6 @@ jobs:
                 
         except Exception as e:
             print(f'Error reading metadata: {e}')
-            print('Metadata file may not have been created properly.')
         "
         
         echo ""
@@ -187,12 +175,12 @@ jobs:
         echo "   • generation_metadata.json - Generation statistics and metadata"
         echo "   • generation_output.txt - Complete console output with family details"
         echo ""
-        echo "="*60
+        echo "============================================================"
         echo "✅ Enhanced family generation completed successfully!"
         echo "🔗 Real database integration with OEWS wage data"
         echo "📊 State-specific employment and education distributions" 
         echo "💼 Probability-based occupation selection"
-        echo "="*60
+        echo "============================================================"
     
     - name: Upload Generation Results
       uses: actions/upload-artifact@v4
