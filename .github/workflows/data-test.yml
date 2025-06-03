@@ -1,4 +1,4 @@
-name: Enhanced Family Generator
+name: Family Generator
 
 on:
   workflow_dispatch:
@@ -45,14 +45,14 @@ jobs:
         fi
         
         echo "args=$ARGS" >> $GITHUB_OUTPUT
-        echo "Generated command: python enhanced_family_generator.py $ARGS"
+        echo "Generated command: python data_generator.py $ARGS"
     
     - name: Generate Families
       env:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🏠 Generating families with enhanced database integration..."
-        echo "Command: python enhanced_family_generator.py ${{ steps.build_args.outputs.args }}"
+        echo "Command: python data_generator.py ${{ steps.build_args.outputs.args }}"
         echo ""
         
         python enhanced_family_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
