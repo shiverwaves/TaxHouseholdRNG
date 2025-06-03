@@ -57,115 +57,67 @@ jobs:
         
         python enhanced_family_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
     
-    - name: Parse and Create JSON Output
+    - name: Create Generation Metadata
       run: |
-        echo "📊 Creating JSON output for artifact..."
+        echo "📊 Creating generation metadata..."
         
-        python -c "
-        import json
-        import re
-        from datetime import datetime
+        COUNT="${{ github.event.inputs.count || '10' }}"
+        STATE="${{ github.event.inputs.state || 'random' }}"
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         
-        # Read the generation output
-        try:
-            with open('generation_output.txt', 'r') as f:
-                output_lines = f.readlines()
-        except:
-            output_lines = []
-        
-        # Extract key information from output
-        families_generated = 0
-        avg_income = 0
-        median_income = 0
-        
-        for line in output_lines:
-            if 'Successfully generated' in line and 'families' in line:
-                match = re.search(r'generated (\d+) families', line)
-                if match:
-                    families_generated = int(match.group(1))
-            elif 'Average household income:' in line:
-                match = re.search(r'\\\$([0-9,]+)', line)
-                if match:
-                    avg_income = int(match.group(1).replace(',', ''))
-            elif 'Median household income:' in line:
-                match = re.search(r'\\\$([0-9,]+)', line)
-                if match:
-                    median_income = int(match.group(1).replace(',', ''))
-        
-        # Create metadata JSON
-        generation_metadata = {
-            'generation_date': datetime.now().isoformat(),
-            'generator_version': 'enhanced_v1',
-            'database_integration': True,
-            'families_generated': families_generated,
-            'parameters': {
-                'count': '${{ github.event.inputs.count || \"10\" }}',
-                'state': '${{ github.event.inputs.state || \"random\" }}'
-            },
-            'statistics': {
-                'average_household_income': avg_income,
-                'median_household_income': median_income
-            },
-            'data_sources': [
-                'OEWS wage data',
-                'Census state demographics', 
-                'Education-occupation probability matrices',
-                'State employment statistics'
-            ],
-            'features': [
-                'Real employment rates by state and education',
-                'Probability-based occupation selection', 
-                'Current wages from OEWS database',
-                'Realistic unemployment benefits',
-                'State-specific education distributions'
-            ]
+        cat > generation_metadata.json << EOF
+        {
+          "generation_date": "$TIMESTAMP",
+          "generator_version": "enhanced_v1",
+          "database_integration": true,
+          "parameters": {
+            "count": "$COUNT",
+            "state": "$STATE"
+          },
+          "data_sources": [
+            "OEWS wage data",
+            "Census state demographics", 
+            "Education-occupation probability matrices",
+            "State employment statistics"
+          ],
+          "features": [
+            "Real employment rates by state and education",
+            "Probability-based occupation selection", 
+            "Current wages from OEWS database",
+            "Realistic unemployment benefits",
+            "State-specific education distributions"
+          ],
+          "output_files": [
+            "generation_output.txt",
+            "generation_metadata.json"
+          ]
         }
+        EOF
         
-        # Save metadata
-        with open('generation_metadata.json', 'w') as f:
-            json.dump(generation_metadata, f, indent=2)
-        
-        print('✅ Generation metadata saved to generation_metadata.json')
-        "
+        echo "✅ Generation metadata created"
     
     - name: Generate Summary Report
       run: |
         echo ""
         echo "📊 ENHANCED FAMILY GENERATOR SUMMARY"
         echo "============================================================"
-        
-        python -c "
-        import json
-        
-        try:
-            with open('generation_metadata.json', 'r') as f:
-                metadata = json.load(f)
-                
-            print(f'📅 Generated: {metadata[\"generation_date\"]}')
-            print(f'🔗 Generator Version: {metadata[\"generator_version\"]}')
-            print(f'👥 Families Generated: {metadata[\"families_generated\"]}')
-            print(f'🎯 Target State: {metadata[\"parameters\"][\"state\"]}')
-            print(f'📊 Count Requested: {metadata[\"parameters\"][\"count\"]}')
-            
-            if metadata[\"statistics\"][\"average_household_income\"] > 0:
-                print(f'💰 Average Income: \\\${metadata[\"statistics\"][\"average_household_income\"]:,}')
-            if metadata[\"statistics\"][\"median_household_income\"] > 0:
-                print(f'💰 Median Income: \\\${metadata[\"statistics\"][\"median_household_income\"]:,}')
-            
-            print('')
-            print('🚀 ENHANCED FEATURES:')
-            for feature in metadata[\"features\"]:
-                print(f'   ✅ {feature}')
-            
-            print('')    
-            print('📊 DATA SOURCES:')
-            for source in metadata[\"data_sources\"]:
-                print(f'   • {source}')
-                
-        except Exception as e:
-            print(f'Error reading metadata: {e}')
-        "
-        
+        echo "📅 Generated: $(date -u)"
+        echo "🔗 Generator Version: enhanced_v1"
+        echo "👥 Count Requested: ${{ github.event.inputs.count || '10' }}"
+        echo "🎯 Target State: ${{ github.event.inputs.state || 'random' }}"
+        echo ""
+        echo "🚀 ENHANCED FEATURES:"
+        echo "   ✅ Real employment rates by state and education"
+        echo "   ✅ Probability-based occupation selection"
+        echo "   ✅ Current wages from OEWS database"
+        echo "   ✅ Realistic unemployment benefits"
+        echo "   ✅ State-specific education distributions"
+        echo ""
+        echo "📊 DATA SOURCES:"
+        echo "   • OEWS wage data"
+        echo "   • Census state demographics"
+        echo "   • Education-occupation probability matrices"
+        echo "   • State employment statistics"
         echo ""
         echo "💡 FULL FAMILY DETAILS:"
         echo "   The complete family data with all member details"
@@ -191,7 +143,7 @@ jobs:
           generation_output.txt
         retention-days: 30
     
-    - name: Create Summary
+    - name: Create Download Instructions
       run: |
         echo ""
         echo "📁 DOWNLOAD INSTRUCTIONS:"
