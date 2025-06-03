@@ -1,444 +1,70 @@
-name: Family Generator Test Suit
+name: Family Generator
 
 on:
-  # Run on push to main branch
-  push:
-    branches: [ main ]
-  
-  # Run on pull requests
-  pull_request:
-    branches: [ main ]
-  
   # Allow manual execution with custom parameters
   workflow_dispatch:
     inputs:
-      test_count:
-        description: 'Number of families to generate per test'
+      count:
+        description: 'Number of families to generate'
         required: false
-        default: '5'
+        default: '10'
         type: string
-      custom_state:
-        description: 'Custom state to test (optional)'
+      state:
+        description: 'Target state (e.g., California, Texas)'
         required: false
         default: ''
         type: string
-      custom_params:
-        description: 'Custom parameters (e.g., --race hispanic --education bachelors)'
+      family_type:
+        description: 'Family structure'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - 'married_couple'
+          - 'single_person'
+          - 'single_parent_female'
+          - 'single_parent_male'
+      race:
+        description: 'Race/ethnicity (e.g., hispanic, white, black, asian)'
         required: false
         default: ''
         type: string
-      run_performance_test:
-        description: 'Run performance test with large dataset'
+      education:
+        description: 'Education level'
         required: false
-        default: false
-        type: boolean
+        default: ''
+        type: choice
+        options:
+          - ''
+          - 'less_than_hs'
+          - 'high_school'
+          - 'some_college'
+          - 'bachelors'
+          - 'graduate'
+      income_range:
+        description: 'Income range (e.g., 50000-80000)'
+        required: false
+        default: ''
+        type: string
+      children:
+        description: 'Number of children'
+        required: false
+        default: ''
+        type: string
+      age_range:
+        description: 'Age range for head of household (e.g., 30-50)'
+        required: false
+        default: ''
+        type: string
 
-  # Run on schedule (weekly)
-  schedule:
-    - cron: '0 6 * * 1'  # Every Monday at 6 AM UTC
+  # Run on push to main (with default parameters)
+  push:
+    branches: [ main ]
 
 jobs:
-  test-family-generator:
+  generate-families:
     runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        python-version: [3.9, 3.10, 3.11]
-      fail-fast: false
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install psycopg2-binary python-dotenv
-        # Install additional dependencies if you have a requirements.txt
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Create test results directory
-      run: mkdir -p test_results
-    
-    - name: Test 1 - Basic Random Families
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing basic random family generation..."
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '5' }} \
-          --output test_results/basic_random_families.json
-    
-    - name: Test 2 - State-Specific Families
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing state-specific families..."
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --state ${{ github.event.inputs.custom_state || 'California' }} \
-          --output test_results/california_families.json
-        
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --state Texas \
-          --output test_results/texas_families.json
-    
-    - name: Test 3 - Family Structure Variations
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing different family structures..."
-        
-        # Married couples with children
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --family-type married_couple \
-          --children 2 \
-          --output test_results/married_couples_with_kids.json
-        
-        # Single parent families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --family-type single_parent_female \
-          --children 1 \
-          --output test_results/single_mothers.json
-        
-        # Single person households
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --family-type single_person \
-          --age-range 25-35 \
-          --output test_results/young_singles.json
-    
-    - name: Test 4 - Demographic Variations
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing demographic variations..."
-        
-        # Hispanic families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --race hispanic \
-          --state California \
-          --output test_results/hispanic_families.json
-        
-        # High education families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --education bachelors \
-          --income-range 60000-120000 \
-          --output test_results/college_educated_families.json
-        
-        # Working class families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --education high_school \
-          --income-range 30000-55000 \
-          --output test_results/working_class_families.json
-    
-    - name: Test 5 - Income-Based Scenarios
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing income-based scenarios..."
-        
-        # Low-income families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --income-range 20000-40000 \
-          --output test_results/low_income_families.json
-        
-        # Middle-class families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --income-range 50000-90000 \
-          --family-type married_couple \
-          --output test_results/middle_class_families.json
-        
-        # High-income families
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '3' }} \
-          --income-range 100000-200000 \
-          --education graduate \
-          --output test_results/high_income_families.json
-    
-    - name: Test 6 - Custom Parameters
-      if: github.event.inputs.custom_params != ''
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Testing custom parameters..."
-        python data-generator.py \
-          --count ${{ github.event.inputs.test_count || '5' }} \
-          ${{ github.event.inputs.custom_params }} \
-          --output test_results/custom_families.json
-    
-    - name: Test 7 - Performance Test
-      if: github.event.inputs.run_performance_test == 'true' || github.event_name == 'schedule'
-      env:
-        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
-      run: |
-        echo "🧪 Running performance test..."
-        time python data-generator.py \
-          --count 100 \
-          --output test_results/performance_test_families.json
-    
-    - name: Test 8 - Database Fallback Test
-      run: |
-        echo "🧪 Testing database fallback (no connection)..."
-        # Run without database connection to test fallback data
-        python data-generator.py \
-          --count 3 \
-          --output test_results/fallback_test_families.json
-    
-    - name: Validate Generated Families
-      run: |
-        echo "🔍 Validating generated families..."
-        python -c "
-        import json
-        import os
-        
-        def validate_family_file(filepath):
-            if not os.path.exists(filepath):
-                print(f'❌ Missing: {filepath}')
-                return False
-            
-            try:
-                with open(filepath, 'r') as f:
-                    families = json.load(f)
-                
-                if not isinstance(families, list):
-                    print(f'❌ {filepath}: Not a list')
-                    return False
-                
-                if len(families) == 0:
-                    print(f'⚠️  {filepath}: Empty list')
-                    return True
-                
-                # Validate first family structure
-                family = families[0]
-                required_fields = ['family_id', 'state_name', 'family_type', 'members']
-                
-                for field in required_fields:
-                    if field not in family:
-                        print(f'❌ {filepath}: Missing field {field}')
-                        return False
-                
-                # Validate members
-                if not family['members'] or len(family['members']) == 0:
-                    print(f'❌ {filepath}: No family members')
-                    return False
-                
-                member = family['members'][0]
-                required_member_fields = ['role', 'age', 'gender', 'race']
-                
-                for field in required_member_fields:
-                    if field not in member:
-                        print(f'❌ {filepath}: Missing member field {field}')
-                        return False
-                
-                print(f'✅ {filepath}: Valid ({len(families)} families)')
-                return True
-                
-            except json.JSONDecodeError as e:
-                print(f'❌ {filepath}: Invalid JSON - {e}')
-                return False
-            except Exception as e:
-                print(f'❌ {filepath}: Error - {e}')
-                return False
-        
-        # Validate all test result files
-        test_files = [
-            'test_results/basic_random_families.json',
-            'test_results/california_families.json',
-            'test_results/texas_families.json',
-            'test_results/married_couples_with_kids.json',
-            'test_results/single_mothers.json',
-            'test_results/young_singles.json',
-            'test_results/hispanic_families.json',
-            'test_results/college_educated_families.json',
-            'test_results/working_class_families.json',
-            'test_results/low_income_families.json',
-            'test_results/middle_class_families.json',
-            'test_results/high_income_families.json',
-            'test_results/fallback_test_families.json'
-        ]
-        
-        valid_count = 0
-        total_count = 0
-        
-        for filepath in test_files:
-            total_count += 1
-            if validate_family_file(filepath):
-                valid_count += 1
-        
-        print(f'\n📊 Validation Summary: {valid_count}/{total_count} files valid')
-        
-        if valid_count == total_count:
-            print('🎉 All tests passed!')
-        else:
-            print('⚠️  Some tests failed')
-            exit(1)
-        "
-    
-    - name: Generate Test Report
-      run: |
-        echo "📊 Generating test report..."
-        python -c "
-        import json
-        import os
-        from datetime import datetime
-        
-        report = {
-            'test_run': {
-                'timestamp': datetime.now().isoformat(),
-                'python_version': '${{ matrix.python-version }}',
-                'github_ref': '${{ github.ref }}',
-                'github_sha': '${{ github.sha }}'
-            },
-            'test_results': []
-        }
-        
-        test_files = [
-            ('Basic Random', 'test_results/basic_random_families.json'),
-            ('California Specific', 'test_results/california_families.json'),
-            ('Texas Specific', 'test_results/texas_families.json'),
-            ('Married Couples', 'test_results/married_couples_with_kids.json'),
-            ('Single Mothers', 'test_results/single_mothers.json'),
-            ('Young Singles', 'test_results/young_singles.json'),
-            ('Hispanic Families', 'test_results/hispanic_families.json'),
-            ('College Educated', 'test_results/college_educated_families.json'),
-            ('Working Class', 'test_results/working_class_families.json'),
-            ('Low Income', 'test_results/low_income_families.json'),
-            ('Middle Class', 'test_results/middle_class_families.json'),
-            ('High Income', 'test_results/high_income_families.json'),
-            ('Fallback Test', 'test_results/fallback_test_families.json')
-        ]
-        
-        for test_name, filepath in test_files:
-            result = {'test_name': test_name, 'filepath': filepath}
-            
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, 'r') as f:
-                        families = json.load(f)
-                    
-                    result['status'] = 'success'
-                    result['family_count'] = len(families)
-                    
-                    if families:
-                        # Calculate statistics
-                        total_income = sum(f.get('total_household_income', 0) for f in families)
-                        avg_income = total_income / len(families)
-                        avg_size = sum(f.get('family_size', 0) for f in families) / len(families)
-                        
-                        result['statistics'] = {
-                            'average_income': round(avg_income, 2),
-                            'average_family_size': round(avg_size, 2),
-                            'total_members': sum(f.get('family_size', 0) for f in families)
-                        }
-                        
-                        # Family type distribution
-                        family_types = {}
-                        for family in families:
-                            ftype = family.get('family_type', 'Unknown')
-                            family_types[ftype] = family_types.get(ftype, 0) + 1
-                        result['family_types'] = family_types
-                    
-                except Exception as e:
-                    result['status'] = 'error'
-                    result['error'] = str(e)
-            else:
-                result['status'] = 'missing'
-            
-            report['test_results'].append(result)
-        
-        # Save report
-        with open('test_results/test_report.json', 'w') as f:
-            json.dump(report, f, indent=2)
-        
-        # Print summary
-        print('\\n📋 TEST SUMMARY')
-        print('=' * 50)
-        for result in report['test_results']:
-            status_emoji = {'success': '✅', 'error': '❌', 'missing': '⚠️ '}
-            status = result['status']
-            emoji = status_emoji.get(status, '❓')
-            
-            print(f'{emoji} {result[\"test_name\"]}: {status}')
-            if status == 'success' and 'statistics' in result:
-                stats = result['statistics']
-                print(f'   Families: {result[\"family_count\"]}, Avg Income: \${stats[\"average_income\"]:,.0f}, Avg Size: {stats[\"average_family_size\"]:.1f}')
-        "
-    
-    - name: Upload Test Results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: family-generator-test-results-python${{ matrix.python-version }}
-        path: test_results/
-        retention-days: 30
-    
-    - name: Comment PR with Results
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          
-          if (fs.existsSync('test_results/test_report.json')) {
-            const report = JSON.parse(fs.readFileSync('test_results/test_report.json', 'utf8'));
-            const successCount = report.test_results.filter(r => r.status === 'success').length;
-            const totalCount = report.test_results.length;
-            
-            const body = `## 🏠 Family Generator Test Results (Python ${{ matrix.python-version }})
-          
-          **Summary**: ${successCount}/${totalCount} tests passed
-          
-          ### Test Results:
-          ${report.test_results.map(result => {
-            const emoji = result.status === 'success' ? '✅' : result.status === 'error' ? '❌' : '⚠️';
-            let line = `${emoji} **${result.test_name}**: ${result.status}`;
-            if (result.status === 'success' && result.statistics) {
-              line += ` (${result.family_count} families, avg income: $${result.statistics.average_income.toLocaleString()})`;
-            }
-            return line;
-          }).join('\n')}
-          
-          <details>
-          <summary>View detailed statistics</summary>
-          
-          \`\`\`json
-          ${JSON.stringify(report, null, 2)}
-          \`\`\`
-          </details>`;
-          
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
-          }
-
-  test-without-database:
-    runs-on: ubuntu-latest
-    name: Test Fallback Data (No Database)
     
     steps:
     - name: Checkout code
@@ -454,23 +80,189 @@ jobs:
         python -m pip install --upgrade pip
         pip install psycopg2-binary python-dotenv
     
-    - name: Test without database connection
+    - name: Build command arguments
+      id: build_args
       run: |
-        echo "🧪 Testing fallback data functionality..."
-        python data-generator.py \
-          --count 10 \
-          --state California \
-          --family-type married_couple \
-          --race hispanic \
-          --output no_db_test_families.json
+        ARGS="--count ${{ github.event.inputs.count || '10' }}"
         
-        # Verify the file was created and contains valid data
+        if [[ -n "${{ github.event.inputs.state }}" ]]; then
+          ARGS="$ARGS --state '${{ github.event.inputs.state }}'"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.family_type }}" ]]; then
+          ARGS="$ARGS --family-type ${{ github.event.inputs.family_type }}"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.race }}" ]]; then
+          ARGS="$ARGS --race '${{ github.event.inputs.race }}'"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.education }}" ]]; then
+          ARGS="$ARGS --education ${{ github.event.inputs.education }}"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.income_range }}" ]]; then
+          ARGS="$ARGS --income-range ${{ github.event.inputs.income_range }}"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.children }}" ]]; then
+          ARGS="$ARGS --children ${{ github.event.inputs.children }}"
+        fi
+        
+        if [[ -n "${{ github.event.inputs.age_range }}" ]]; then
+          ARGS="$ARGS --age-range ${{ github.event.inputs.age_range }}"
+        fi
+        
+        echo "args=$ARGS" >> $GITHUB_OUTPUT
+        echo "Generated command: python data-generator.py $ARGS --output families.json"
+    
+    - name: Generate Families
+      env:
+        NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
+      run: |
+        echo "🏠 Generating families with parameters..."
+        echo "Command: python data-generator.py ${{ steps.build_args.outputs.args }} --output families.json"
+        echo ""
+        
+        python data-generator.py ${{ steps.build_args.outputs.args }} --output families.json
+    
+    - name: Generate Summary Report
+      run: |
+        echo "📊 Generating summary report..."
         python -c "
         import json
-        with open('no_db_test_families.json', 'r') as f:
+        from datetime import datetime
+        
+        # Load generated families
+        with open('families.json', 'r') as f:
             families = json.load(f)
-        print(f'✅ Generated {len(families)} families without database connection')
-        assert len(families) == 10, 'Expected 10 families'
-        assert all('family_id' in f for f in families), 'All families should have IDs'
-        print('✅ Fallback data test passed!')
+        
+        print('\\n' + '='*60)
+        print('🏠 FAMILY GENERATION SUMMARY')
+        print('='*60)
+        print(f'📅 Generated: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S UTC\")}')
+        print(f'👥 Total Families: {len(families)}')
+        
+        if families:
+            # Calculate statistics
+            total_members = sum(f.get('family_size', 0) for f in families)
+            total_income = sum(f.get('total_household_income', 0) for f in families)
+            avg_income = total_income / len(families)
+            avg_size = total_members / len(families)
+            total_earners = sum(f.get('total_earners', 0) for f in families)
+            
+            print(f'👨‍👩‍👧‍👦 Total Members: {total_members}')
+            print(f'💰 Total Income: \${total_income:,}')
+            print(f'📈 Average Income: \${avg_income:,.0f}')
+            print(f'📊 Average Family Size: {avg_size:.1f}')
+            print(f'💼 Total Earners: {total_earners}')
+            
+            # Geographic distribution
+            print('\\n🗺️  GEOGRAPHIC DISTRIBUTION:')
+            states = {}
+            regions = {}
+            for family in families:
+                state = family.get('state_name', 'Unknown')
+                region = family.get('region', 'Unknown')
+                states[state] = states.get(state, 0) + 1
+                regions[region] = regions.get(region, 0) + 1
+            
+            for state, count in sorted(states.items()):
+                print(f'   {state}: {count} families')
+            
+            print('\\n🌎 REGIONAL DISTRIBUTION:')
+            for region, count in sorted(regions.items()):
+                print(f'   {region}: {count} families')
+            
+            # Family structure distribution
+            print('\\n👨‍👩‍👧‍👦 FAMILY STRUCTURE:')
+            structures = {}
+            for family in families:
+                structure = family.get('family_type', 'Unknown')
+                structures[structure] = structures.get(structure, 0) + 1
+            
+            for structure, count in sorted(structures.items()):
+                percentage = (count / len(families)) * 100
+                print(f'   {structure}: {count} ({percentage:.1f}%)')
+            
+            # Race/ethnicity distribution
+            print('\\n🌈 RACE/ETHNICITY DISTRIBUTION:')
+            races = {}
+            for family in families:
+                race = family.get('race', 'Unknown')
+                races[race] = races.get(race, 0) + 1
+            
+            for race, count in sorted(races.items()):
+                percentage = (count / len(families)) * 100
+                print(f'   {race}: {count} ({percentage:.1f}%)')
+            
+            # Education distribution
+            print('\\n🎓 EDUCATION DISTRIBUTION:')
+            education_levels = {}
+            for family in families:
+                education = family.get('highest_education', 'Unknown')
+                education_levels[education] = education_levels.get(education, 0) + 1
+            
+            for education, count in sorted(education_levels.items()):
+                percentage = (count / len(families)) * 100
+                print(f'   {education}: {count} ({percentage:.1f}%)')
+            
+            # Income distribution
+            print('\\n💰 INCOME DISTRIBUTION:')
+            income_brackets = {
+                'Under \$25K': 0,
+                '\$25K - \$50K': 0,
+                '\$50K - \$75K': 0,
+                '\$75K - \$100K': 0,
+                '\$100K - \$150K': 0,
+                'Over \$150K': 0
+            }
+            
+            for family in families:
+                income = family.get('total_household_income', 0)
+                if income < 25000:
+                    income_brackets['Under \$25K'] += 1
+                elif income < 50000:
+                    income_brackets['\$25K - \$50K'] += 1
+                elif income < 75000:
+                    income_brackets['\$50K - \$75K'] += 1
+                elif income < 100000:
+                    income_brackets['\$75K - \$100K'] += 1
+                elif income < 150000:
+                    income_brackets['\$100K - \$150K'] += 1
+                else:
+                    income_brackets['Over \$150K'] += 1
+            
+            for bracket, count in income_brackets.items():
+                percentage = (count / len(families)) * 100
+                print(f'   {bracket}: {count} ({percentage:.1f}%)')
+            
+            # Sample families
+            print('\\n👥 SAMPLE FAMILIES:')
+            for i, family in enumerate(families[:5]):
+                print(f'\\n   Family {i+1} ({family.get(\"family_id\", \"Unknown\")}):')
+                print(f'      📍 Location: {family.get(\"state_name\", \"Unknown\")}')
+                print(f'      🏠 Type: {family.get(\"family_type\", \"Unknown\")}')
+                print(f'      🌈 Race: {family.get(\"race\", \"Unknown\")}')
+                print(f'      👥 Size: {family.get(\"family_size\", 0)} members')
+                print(f'      💰 Income: \${family.get(\"total_household_income\", 0):,}')
+                print(f'      🎓 Education: {family.get(\"highest_education\", \"Unknown\")}')
+                
+                print(f'      👨‍👩‍👧‍👦 Members:')
+                for member in family.get('members', []):
+                    occupation = member.get('occupation', 'No occupation')
+                    income = member.get('annual_income', 0)
+                    income_str = f', \${income:,}' if income > 0 else ''
+                    print(f'         • {member.get(\"role\", \"Unknown\")}: {member.get(\"gender\", \"Unknown\")}, Age {member.get(\"age\", 0)}, {member.get(\"education_level\", \"Unknown\")}, {occupation}{income_str}')
+        
+        print('\\n' + '='*60)
+        print('✅ Family generation completed successfully!')
+        print('='*60)
         "
+    
+    - name: Upload Generated Families
+      uses: actions/upload-artifact@v3
+      with:
+        name: generated-families
+        path: families.json
+        retention-days: 30
