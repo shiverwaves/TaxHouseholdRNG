@@ -55,7 +55,7 @@ jobs:
         echo "Command: python data_generator.py ${{ steps.build_args.outputs.args }}"
         echo ""
         
-        python enhanced_family_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
+        python data_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
     
     - name: Create Generation Metadata
       run: |
