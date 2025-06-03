@@ -45,17 +45,17 @@ jobs:
         fi
         
         echo "args=$ARGS" >> $GITHUB_OUTPUT
-        echo "Generated command: python data_generator.py $ARGS"
+        echo "Generated command: python data-generator.py $ARGS"
     
     - name: Generate Families
       env:
         NEON_CONNECTION_STRING: ${{ secrets.NEON_CONNECTION_STRING }}
       run: |
         echo "🏠 Generating families with enhanced database integration..."
-        echo "Command: python data_generator.py ${{ steps.build_args.outputs.args }}"
+        echo "Command: python data-generator.py ${{ steps.build_args.outputs.args }}"
         echo ""
         
-        python data_generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
+        python data-generator.py ${{ steps.build_args.outputs.args }} 2>&1 | tee generation_output.txt
     
     - name: Create Generation Metadata
       run: |
