@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Enhanced Family Generator with Real Database Integration
+Enhanced Family Generator with Real Database Integration + Tax Characteristics
 
 This version integrates the rich database enhancements from generator_changes.py
-to use actual employment rates, education-occupation probabilities, and real wage data.
+to use actual employment rates, education-occupation probabilities, and real wage data,
+PLUS adds comprehensive tax-specific characteristics including filing status, deductions,
+and tax-relevant events.
 
 Usage:
-    python enhanced_family_generator.py --count 5
+    python data-generator.py --count 5
+    python data-generator.py --count 10 --state California
 """
 
 import psycopg2
@@ -15,7 +18,7 @@ import json
 import sys
 import os
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 # Load environment variables
@@ -30,7 +33,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EnhancedFamilyGenerator:
-    """Enhanced family generator with realistic income calculations and rich database integration"""
+    """Enhanced family generator with realistic income calculations, database integration, and tax characteristics"""
     
     def __init__(self):
         self.connection_string = os.getenv('NEON_CONNECTION_STRING')
@@ -56,13 +59,82 @@ class EnhancedFamilyGenerator:
         
         # Current date for age-based logic
         self.current_year = datetime.now().year
+        
+        # Initialize tax-related data
+        self._init_tax_data()
+    
+    def _init_tax_data(self):
+        """Initialize tax-related constants and probabilities"""
+        # Tax brackets and thresholds for 2023 tax year
+        self.tax_year = 2023
+        
+        # Income thresholds that affect tax behavior
+        self.income_thresholds = {
+            'low_income': 30000,
+            'middle_income': 75000, 
+            'high_income': 200000,
+            'very_high_income': 500000
+        }
+        
+        # Standard deduction amounts for 2023
+        self.standard_deductions = {
+            'single': 13850,
+            'married_filing_jointly': 27700,
+            'married_filing_separately': 13850,
+            'head_of_household': 20800
+        }
+        
+        # Deduction patterns by income level
+        self.deduction_patterns = {
+            'low_income': {
+                'itemize_probability': 0.15,
+                'avg_charitable_percent': 0.03,
+                'avg_state_local_tax_percent': 0.08,
+                'avg_mortgage_interest_percent': 0.12,
+                'avg_medical_percent': 0.05
+            },
+            'middle_income': {
+                'itemize_probability': 0.35,
+                'avg_charitable_percent': 0.025,
+                'avg_state_local_tax_percent': 0.09,
+                'avg_mortgage_interest_percent': 0.15,
+                'avg_medical_percent': 0.03
+            },
+            'high_income': {
+                'itemize_probability': 0.65,
+                'avg_charitable_percent': 0.04,
+                'avg_state_local_tax_percent': 0.10,
+                'avg_mortgage_interest_percent': 0.10,
+                'avg_medical_percent': 0.02
+            },
+            'very_high_income': {
+                'itemize_probability': 0.85,
+                'avg_charitable_percent': 0.06,
+                'avg_state_local_tax_percent': 0.05,
+                'avg_mortgage_interest_percent': 0.08,
+                'avg_medical_percent': 0.02
+            }
+        }
+        
+        # Tax event probabilities
+        self.tax_event_probabilities = {
+            'job_change': 0.15,
+            'major_medical_expenses': 0.08,
+            'home_purchase': 0.06,
+            'home_sale': 0.04,
+            'investment_activity': 0.25,
+            'education_expenses': 0.12,
+            'business_income': 0.08,
+            'retirement_contribution': 0.45,
+            'dependent_care_expenses': 0.20,
+        }
     
     def _load_cache_safely(self):
         """Enhanced cache loading with real demographic data"""
         logger.info("Loading comprehensive data cache...")
         
         try:
-            # Initialize cache structure (add new sections)
+            # Initialize cache structure
             self._cache = {
                 'states': {},
                 'state_weights': {},
@@ -74,7 +146,6 @@ class EnhancedFamilyGenerator:
                 'state_occupation_wages': {},
                 'state_education_occupation_probs': {},
                 'national_education_occupation_probs': {},
-                # NEW: Real demographic data
                 'state_employment_rates': {},
                 'education_occupation_probs': {},
                 'state_education_distributions': {}
@@ -87,7 +158,7 @@ class EnhancedFamilyGenerator:
             self._load_family_structures_safely()
             self._load_occupation_data_safely()
             
-            # Load NEW comprehensive data
+            # Load comprehensive data
             self._load_real_employment_rates()
             self._load_education_occupation_probabilities()
             self._load_real_education_distributions()
@@ -101,7 +172,6 @@ class EnhancedFamilyGenerator:
     def _load_real_employment_rates(self):
         """Load actual state-specific employment rates from database"""
         try:
-            # Get employment rates by state
             self.cursor.execute("""
                 SELECT 
                     sd.state_code,
@@ -126,13 +196,11 @@ class EnhancedFamilyGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to load employment rates: {e}")
-            # Fallback to national averages
             self._cache['state_employment_rates'] = {}
 
     def _load_education_occupation_probabilities(self):
         """Load education-occupation probability matrix from database"""
         try:
-            # Load state-specific probabilities
             self.cursor.execute("""
                 SELECT 
                     el.level_key,
@@ -145,7 +213,7 @@ class EnhancedFamilyGenerator:
                 FROM education.occupation_probabilities eop
                 JOIN education_levels el ON eop.education_level_id = el.id
                 LEFT JOIN oews.occupation_details od ON eop.occ_code = od.occ_code
-                WHERE eop.probability > 0.001  -- Only significant probabilities
+                WHERE eop.probability > 0.001
                 ORDER BY eop.state_code, el.level_key, eop.probability DESC
             """)
             
@@ -153,7 +221,6 @@ class EnhancedFamilyGenerator:
             for row in self.cursor.fetchall():
                 education_key, occ_code, state_code, probability, emp_share, occ_title, major_group = row
                 
-                # Create nested structure: state -> education -> occupations
                 if state_code not in self._cache['education_occupation_probs']:
                     self._cache['education_occupation_probs'][state_code] = {}
                 
@@ -180,7 +247,7 @@ class EnhancedFamilyGenerator:
                 FROM education.occupation_probabilities eop
                 JOIN education_levels el ON eop.education_level_id = el.id
                 LEFT JOIN oews.occupation_details od ON eop.occ_code = od.occ_code
-                WHERE eop.state_code IS NULL  -- National data
+                WHERE eop.state_code IS NULL
                   AND eop.probability > 0.001
                 ORDER BY el.level_key, eop.probability DESC
             """)
@@ -252,7 +319,6 @@ class EnhancedFamilyGenerator:
             for row in rows:
                 state_code, state_name, region_name, total_pop, pop_weight = row
                 
-                # Safely handle None values
                 region_name = region_name or 'Unknown'
                 total_pop = total_pop or 0
                 pop_weight = float(pop_weight) if pop_weight else 1.0
@@ -269,7 +335,6 @@ class EnhancedFamilyGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to load state data: {e}")
-            # Create minimal fallback
             self._cache['states']['06'] = {
                 'name': 'California', 'region': 'West', 'population': 39000000, 'weight': 12.0
             }
@@ -296,7 +361,6 @@ class EnhancedFamilyGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to load education levels: {e}")
-            # Create fallback education levels
             self._cache['education_levels'] = {
                 'less_than_hs': {'name': 'Less than High School', 'sort_order': 1, 'typical_years': 11},
                 'high_school': {'name': 'High School Graduate', 'sort_order': 2, 'typical_years': 12},
@@ -331,7 +395,6 @@ class EnhancedFamilyGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to load race data: {e}")
-            # Create fallback race data
             for state_code in self._cache['states'].keys():
                 self._cache['state_race_data'][state_code] = {
                     'WHITE_NON_HISPANIC': {'name': 'White Non-Hispanic', 'percent': 60.0},
@@ -366,7 +429,6 @@ class EnhancedFamilyGenerator:
             
         except Exception as e:
             logger.warning(f"Failed to load family structure data: {e}")
-            # Create fallback family structures
             for state_code in self._cache['states'].keys():
                 self._cache['state_family_structures'][state_code] = {
                     'MARRIED_COUPLE': {'name': 'Married Couple Family', 'percent': 50.0},
@@ -378,24 +440,23 @@ class EnhancedFamilyGenerator:
     def _load_occupation_data_safely(self):
         """Load occupation data with proper query logic for healthy database"""
         try:
-            # Single comprehensive query - get everything we need at once
             self.cursor.execute("""
                 SELECT DISTINCT 
                     occ_code, 
                     occ_title, 
-                    a_median,           -- Use median (more realistic than mean)
-                    a_mean,             -- Keep mean for reference
-                    tot_emp,            -- Employment for weighting
+                    a_median,
+                    a_mean,
+                    tot_emp,
                     state_code
                 FROM oews.employment_wages
                 WHERE occ_code IS NOT NULL 
                   AND occ_title IS NOT NULL 
                   AND a_median IS NOT NULL 
-                  AND a_median > 15000    -- Filter unrealistic wages
-                  AND a_median < 500000   -- Filter unrealistic wages
+                  AND a_median > 15000
+                  AND a_median < 500000
                   AND tot_emp IS NOT NULL 
-                  AND tot_emp > 1000      -- Only jobs with significant employment
-                ORDER BY tot_emp DESC     -- Prioritize common jobs
+                  AND tot_emp > 1000
+                ORDER BY tot_emp DESC
             """)
             
             occupations = {}
@@ -405,7 +466,6 @@ class EnhancedFamilyGenerator:
             for row in self.cursor.fetchall():
                 occ_code, occ_title, a_median, a_mean, tot_emp, state_code = row
                 
-                # Build occupation info (once per occupation)
                 if occ_code not in occupations:
                     occupations[occ_code] = {
                         'title': occ_title,
@@ -414,11 +474,10 @@ class EnhancedFamilyGenerator:
                         'median_wage': float(a_median),
                         'mean_wage': float(a_mean) if a_mean else float(a_median),
                         'total_employment': int(tot_emp),
-                        'employment_weight': 0  # Will calculate after loop
+                        'employment_weight': 0
                     }
                     total_employment += int(tot_emp)
                 
-                # Build state-specific wage data
                 if state_code not in state_wages:
                     state_wages[state_code] = {}
                 
@@ -427,407 +486,21 @@ class EnhancedFamilyGenerator:
                     'annual_mean': float(a_mean) if a_mean else float(a_median)
                 }
             
-            # Calculate employment weights (probability of each job)
             if total_employment > 0:
                 for occ_code, occ_data in occupations.items():
                     occ_data['employment_weight'] = occ_data['total_employment'] / total_employment
             
-            # Store in cache
             if occupations:
                 self._cache['occupations'] = occupations
                 self._cache['state_occupation_wages'] = state_wages
-                
                 logger.info(f"✅ Loaded {len(occupations)} occupations from database")
-                logger.info(f"✅ Loaded wage data for {len(state_wages)} states")
-                logger.info(f"✅ Total employment represented: {total_employment:,}")
-                
             else:
-                logger.warning("❌ No occupations loaded from database - check data quality")
+                logger.warning("❌ No occupations loaded from database")
                 self._create_fallback_occupations()
                 
         except Exception as e:
             logger.error(f"Failed to load occupation data: {e}")
             self._create_fallback_occupations()
-    
-    def _select_occupation_using_probabilities(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
-        """Select occupation using real education-occupation probability matrix"""
-        
-        if age < 16:
-            return None
-        elif 16 <= age <= 18:
-            # Teenagers - use entry-level probabilities but limited to service jobs
-            teen_suitable_groups = ['Food Preparation', 'Sales', 'Personal Care']
-            return self._select_teen_occupation(education_level, state_code, teen_suitable_groups)
-        
-        # Get state-specific probabilities, fallback to national
-        state_probs = self._cache['education_occupation_probs'].get(state_code, {})
-        education_probs = state_probs.get(education_level, [])
-        
-        if not education_probs:
-            # Fallback to national probabilities
-            education_probs = self._cache['national_education_occupation_probs'].get(education_level, [])
-        
-        if not education_probs:
-            return None
-        
-        # Apply employment rate for this education level and state
-        employment_rate = self._get_real_employment_rate(education_level, state_code)
-        
-        if random.random() > employment_rate:
-            return self._generate_unemployment_benefits(age, education_level, state_code)
-        
-        # Select occupation based on probabilities
-        total_prob = sum(occ['probability'] for occ in education_probs)
-        if total_prob <= 0:
-            return None
-        
-        rand_val = random.uniform(0, total_prob)
-        cumulative_prob = 0
-        
-        for occ_data in education_probs:
-            cumulative_prob += occ_data['probability']
-            if rand_val <= cumulative_prob:
-                return self._get_occupation_with_real_wages(occ_data['occ_code'], state_code)
-        
-        # Fallback
-        return self._get_occupation_with_real_wages(education_probs[0]['occ_code'], state_code)
-
-    def _select_teen_occupation(self, education_level: str, state_code: str, suitable_groups: List[str]) -> Optional[Dict[str, Any]]:
-        """Helper method for teen occupation selection"""
-        teen_jobs = []
-        for occ_code, occ_data in self._cache['occupations'].items():
-            if occ_data.get('major_group') in suitable_groups:
-                teen_jobs.append(occ_code)
-        
-        if teen_jobs and random.random() < 0.35:  # 35% teen employment rate
-            occ_code = random.choice(teen_jobs)
-            return self._get_occupation_with_real_wages(occ_code, state_code, part_time=True)
-        return None
-
-    def _get_real_employment_rate(self, education_level: str, state_code: str) -> float:
-        """Get real employment rate for education level and state"""
-        
-        # Get state employment rate
-        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
-        base_employment_rate = state_emp_data.get('employment_rate', 85.0) / 100
-        
-        # Adjust based on education level (education improves employment prospects)
-        education_multipliers = {
-            'less_than_hs': 0.85,  # Below average
-            'high_school': 0.95,   # Near average  
-            'some_college': 1.02,  # Slightly above
-            'bachelors': 1.08,     # Above average
-            'graduate': 1.12       # Well above average
-        }
-        
-        multiplier = education_multipliers.get(education_level, 1.0)
-        adjusted_rate = min(0.98, base_employment_rate * multiplier)  # Cap at 98%
-        
-        return adjusted_rate
-
-    def _select_education_level_using_real_data(self, age: int, state_code: str, race_key: str) -> str:
-        """Select education level using real state demographic data"""
-        
-        if age < 18:
-            return 'less_than_hs'
-        
-        # Get state-specific education distribution
-        state_edu_dist = self._cache['state_education_distributions'].get(state_code, {})
-        
-        if state_edu_dist:
-            # Use real state data
-            education_weights = []
-            education_levels = []
-            
-            for edu_level, percentage in state_edu_dist.items():
-                education_levels.append(edu_level)
-                education_weights.append(percentage)
-            
-            if education_weights and sum(education_weights) > 0:
-                # Age-based adjustments to reflect realistic patterns
-                if 18 <= age <= 24:
-                    # Young adults - boost some_college, reduce graduate
-                    adjusted_weights = []
-                    for i, edu_level in enumerate(education_levels):
-                        weight = education_weights[i]
-                        if edu_level == 'some_college':
-                            weight *= 1.5  # More young people in college
-                        elif edu_level == 'graduate':
-                            weight *= 0.3  # Fewer young graduates
-                        elif edu_level == 'bachelors':
-                            weight *= 0.7  # Some haven't finished yet
-                        adjusted_weights.append(weight)
-                    education_weights = adjusted_weights
-                
-                elif age >= 65:
-                    # Older adults - reflect historical lower education
-                    adjusted_weights = []
-                    for i, edu_level in enumerate(education_levels):
-                        weight = education_weights[i]
-                        if edu_level in ['less_than_hs', 'high_school']:
-                            weight *= 1.3  # Higher historical rates
-                        elif edu_level in ['bachelors', 'graduate']:
-                            weight *= 0.7  # Lower historical rates
-                        adjusted_weights.append(weight)
-                    education_weights = adjusted_weights
-                
-                # Weighted random selection
-                return random.choices(education_levels, weights=education_weights)[0]
-        
-        # Fallback to age-based logic if no state data
-        return self._fallback_education_selection(age)
-
-    def _fallback_education_selection(self, age: int) -> str:
-        """Fallback education selection based on age"""
-        if age < 18:
-            return 'less_than_hs'
-        elif 18 <= age <= 24:
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors'],
-                weights=[20, 50, 25, 5]
-            )[0]
-        elif age >= 65:
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
-                weights=[30, 40, 15, 12, 3]
-            )[0]
-        else:
-            return random.choices(
-                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
-                weights=[12, 40, 28, 15, 5]
-            )[0]
-
-    def _get_occupation_with_real_wages(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
-        """Get occupation with real wages from OEWS database"""
-        
-        try:
-            # Get real wage data from database
-            self.cursor.execute("""
-                SELECT 
-                    ew.occ_title,
-                    ew.a_median,
-                    ew.a_mean,
-                    ew.tot_emp,
-                    od.major_group,
-                    er.typical_education_level_id,
-                    el.level_key
-                FROM oews.employment_wages ew
-                LEFT JOIN oews.occupation_details od ON ew.occ_code = od.occ_code
-                LEFT JOIN education.occupation_requirements er ON ew.occ_code = er.occ_code
-                LEFT JOIN education_levels el ON er.typical_education_level_id = el.id
-                WHERE ew.occ_code = %s AND ew.state_code = %s
-                ORDER BY ew.year DESC
-                LIMIT 1
-            """, (occ_code, state_code))
-            
-            result = self.cursor.fetchone()
-            
-            if result:
-                occ_title, a_median, a_mean, tot_emp, major_group, edu_level_id, edu_key = result
-                
-                # Use median wage (more realistic)
-                base_wage = float(a_median) if a_median else float(a_mean) if a_mean else 35000
-                
-                # Handle part-time work
-                if part_time:
-                    base_wage = int(base_wage * 0.4)  # ~40% of full-time
-                
-                # Small realistic variation (±10%)
-                annual_income = int(base_wage * random.uniform(0.9, 1.1))
-                
-                return {
-                    'occ_code': occ_code,
-                    'title': occ_title or 'Unknown Occupation',
-                    'major_group': major_group or 'Other',
-                    'education_requirement': edu_key or 'high_school',
-                    'annual_income': max(annual_income, 15000),  # Minimum wage floor
-                    'employment_type': 'Part-time' if part_time else 'Full-time',
-                    'data_source': 'database'
-                }
-        
-        except Exception as e:
-            logger.debug(f"Error getting real wages for {occ_code}: {e}")
-        
-        # Fallback to cache if database query fails
-        return self._get_occupation_details_realistic(occ_code, state_code, part_time)
-
-    def _generate_unemployment_benefits(self, age: int, education_level: str, state_code: str) -> Optional[Dict[str, Any]]:
-        """Generate realistic unemployment benefits based on state and education"""
-        
-        if age < 18:
-            return None
-        elif age >= 67:
-            # Social Security benefits
-            monthly_ss = random.randint(800, 2800)  # Realistic SS range
-            return {
-                'occ_code': 'RETIRED',
-                'title': 'Retired (Social Security)',
-                'major_group': 'Retired',
-                'education_requirement': education_level,
-                'annual_income': monthly_ss * 12,
-                'employment_type': 'Retired',
-                'data_source': 'calculated'
-            }
-        
-        # Get state unemployment rate to determine benefit probability
-        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
-        unemployment_rate = state_emp_data.get('unemployment_rate', 5.0)
-        
-        # Higher unemployment rate = higher chance of getting benefits
-        benefit_probability = min(0.8, unemployment_rate / 10 + 0.4)
-        
-        if random.random() < benefit_probability:
-            # Calculate unemployment benefits based on education level (proxy for prior wages)
-            base_weekly_benefit = {
-                'less_than_hs': 200,
-                'high_school': 280,
-                'some_college': 350,
-                'bachelors': 450,
-                'graduate': 520
-            }.get(education_level, 280)
-            
-            # Add state variation (±20%)
-            state_variation = random.uniform(0.8, 1.2)
-            weekly_benefit = int(base_weekly_benefit * state_variation)
-            
-            # Assume 26 weeks of benefits (typical duration)
-            annual_benefit = weekly_benefit * 26
-            
-            return {
-                'occ_code': 'UNEMPLOYED',
-                'title': 'Unemployed (Receiving Benefits)',
-                'major_group': 'Unemployed',
-                'education_requirement': education_level,
-                'annual_income': annual_benefit,
-                'employment_type': 'Unemployed',
-                'data_source': 'calculated'
-            }
-        else:
-            # Disability or other support
-            monthly_benefit = random.randint(700, 1400)
-            return {
-                'occ_code': 'DISABLED',
-                'title': 'Receiving Disability Benefits',
-                'major_group': 'Disabled',
-                'education_requirement': education_level,
-                'annual_income': monthly_benefit * 12,
-                'employment_type': 'Disabled',
-                'data_source': 'calculated'
-            }
-
-    # Updated main occupation selection method to use the new probability-based approach:
-    def _select_occupation(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
-        """Enhanced occupation selection using real database probabilities"""
-        return self._select_occupation_using_probabilities(education_level, age, state_code)
-
-    # Updated education level selection to use real data:
-    def _select_education_level(self, age: int, state_code: str, race_key: str) -> str:
-        """Enhanced education selection using real state data"""
-        return self._select_education_level_using_real_data(age, state_code, race_key)
-    
-    def _create_fallback_occupations(self):
-        """Create fallback occupations with realistic wages based on actual employment data"""
-        
-        # Based on actual BLS employment numbers and MEDIAN wages
-        realistic_occupations = {
-            # HIGH EMPLOYMENT, LOW-MODERATE WAGES (most common jobs)
-            '41-2031': {  # Retail Salespersons - 3.2 million employed, $31k median
-                'title': 'Retail Salespersons', 'major_group': 'Sales', 'education_level': 'high_school', 
-                'median_wage': 31000, 'total_employment': 3200000, 'employment_weight': 0.08
-            },
-            '35-3021': {  # Food Prep Workers - 3.1 million employed, $26k median
-                'title': 'Combined Food Preparation Workers', 'major_group': 'Food Service', 'education_level': 'less_than_hs',
-                'median_wage': 26000, 'total_employment': 3100000, 'employment_weight': 0.078
-            },
-            '41-2011': {  # Cashiers - 2.9 million employed, $28k median
-                'title': 'Cashiers', 'major_group': 'Sales', 'education_level': 'less_than_hs',
-                'median_wage': 28000, 'total_employment': 2900000, 'employment_weight': 0.073
-            },
-            '43-4051': {  # Customer Service - 2.8 million employed, $37k median
-                'title': 'Customer Service Representatives', 'major_group': 'Office Support', 'education_level': 'high_school',
-                'median_wage': 37000, 'total_employment': 2800000, 'employment_weight': 0.07
-            },
-            '53-7062': {  # Laborers - 2.5 million employed, $32k median
-                'title': 'Laborers and Freight Movers', 'major_group': 'Transportation', 'education_level': 'less_than_hs',
-                'median_wage': 32000, 'total_employment': 2500000, 'employment_weight': 0.063
-            },
-            '29-1141': {  # Registered Nurses - 3.2 million employed, $75k median
-                'title': 'Registered Nurses', 'major_group': 'Healthcare', 'education_level': 'bachelors',
-                'median_wage': 75000, 'total_employment': 3200000, 'employment_weight': 0.08
-            },
-            '25-2021': {  # Elementary Teachers - 1.3 million employed, $58k median
-                'title': 'Elementary School Teachers', 'major_group': 'Education', 'education_level': 'bachelors',
-                'median_wage': 58000, 'total_employment': 1300000, 'employment_weight': 0.033
-            },
-            '15-1211': {  # Computer Analysts - 600k employed, $95k median
-                'title': 'Computer Systems Analysts', 'major_group': 'Computer', 'education_level': 'bachelors',
-                'median_wage': 95000, 'total_employment': 600000, 'employment_weight': 0.015
-            }
-        }
-        
-        self._cache['occupations'] = realistic_occupations
-        
-        # Create realistic wage data for each state
-        for state_code in self._cache['states'].keys():
-            self._cache['state_occupation_wages'][state_code] = {}
-            for occ_code, occ_data in realistic_occupations.items():
-                base_salary = occ_data['median_wage']
-                # Add small state variation (±10%)
-                state_variation = random.uniform(0.9, 1.1)
-                
-                self._cache['state_occupation_wages'][state_code][occ_code] = {
-                    'annual_median': int(base_salary * state_variation),
-                    'annual_mean': int(base_salary * state_variation * 1.1)
-                }
-        
-        logger.info(f"✓ Created realistic fallback occupations with employment weighting")
-    
-    def _get_major_group_from_code(self, occ_code: str) -> str:
-        """Get major group from occupation code"""
-        if not occ_code or len(occ_code) < 2:
-            return 'Other'
-        
-        major_groups = {
-            '11': 'Management',
-            '13': 'Business and Financial',
-            '15': 'Computer and Mathematical',
-            '17': 'Architecture and Engineering',
-            '19': 'Life, Physical, and Social Science',
-            '21': 'Community and Social Service',
-            '23': 'Legal',
-            '25': 'Educational',
-            '27': 'Arts and Entertainment',
-            '29': 'Healthcare Practitioners',
-            '31': 'Healthcare Support',
-            '33': 'Protective Service',
-            '35': 'Food Service',
-            '37': 'Building and Maintenance',
-            '39': 'Personal Care',
-            '41': 'Sales',
-            '43': 'Office Support',
-            '45': 'Farming and Forestry',
-            '47': 'Construction',
-            '49': 'Installation and Repair',
-            '51': 'Production',
-            '53': 'Transportation'
-        }
-        
-        return major_groups.get(occ_code[:2], 'Other')
-    
-    def _estimate_education_requirement(self, occ_title: str) -> str:
-        """Estimate education requirement from occupation title"""
-        title_lower = occ_title.lower() if occ_title else ""
-        
-        if any(word in title_lower for word in ['chief', 'director', 'manager', 'executive']):
-            return 'graduate'
-        elif any(word in title_lower for word in ['engineer', 'analyst', 'teacher', 'nurse']):
-            return 'bachelors'
-        elif any(word in title_lower for word in ['technician', 'assistant', 'specialist']):
-            return 'some_college'
-        elif any(word in title_lower for word in ['clerk', 'representative', 'operator']):
-            return 'high_school'
-        else:
-            return 'high_school'
     
     def _create_fallback_cache(self):
         """Create minimal fallback cache if loading fails"""
@@ -839,11 +512,7 @@ class EnhancedFamilyGenerator:
                 '48': {'name': 'Texas', 'region': 'South', 'population': 29000000, 'weight': 9.0},
                 '12': {'name': 'Florida', 'region': 'South', 'population': 22000000, 'weight': 7.0}
             },
-            'state_weights': {
-                '06': 12.0,
-                '48': 9.0,
-                '12': 7.0
-            },
+            'state_weights': {'06': 12.0, '48': 9.0, '12': 7.0},
             'education_levels': {
                 'less_than_hs': {'name': 'Less than High School', 'sort_order': 1, 'typical_years': 11},
                 'high_school': {'name': 'High School Graduate', 'sort_order': 2, 'typical_years': 12},
@@ -863,9 +532,7 @@ class EnhancedFamilyGenerator:
             'state_education_distributions': {}
         }
         
-        # Fill in basic data for each state
         for state_code in self._cache['states'].keys():
-            # Race data
             self._cache['state_race_data'][state_code] = {
                 'WHITE_NON_HISPANIC': {'name': 'White Non-Hispanic', 'percent': 60.0},
                 'HISPANIC': {'name': 'Hispanic or Latino', 'percent': 20.0},
@@ -873,7 +540,6 @@ class EnhancedFamilyGenerator:
                 'ASIAN': {'name': 'Asian', 'percent': 8.0}
             }
             
-            # Family structures
             self._cache['state_family_structures'][state_code] = {
                 'MARRIED_COUPLE': {'name': 'Married Couple Family', 'percent': 50.0},
                 'SINGLE_PERSON': {'name': 'Single Person Household', 'percent': 30.0},
@@ -881,8 +547,76 @@ class EnhancedFamilyGenerator:
                 'SINGLE_PARENT_MALE': {'name': 'Single Father Household', 'percent': 5.0}
             }
     
+    def _create_fallback_occupations(self):
+        """Create fallback occupations with realistic wages"""
+        realistic_occupations = {
+            '41-2031': {
+                'title': 'Retail Salespersons', 'major_group': 'Sales', 'education_level': 'high_school', 
+                'median_wage': 31000, 'total_employment': 3200000, 'employment_weight': 0.08
+            },
+            '35-3021': {
+                'title': 'Combined Food Preparation Workers', 'major_group': 'Food Service', 'education_level': 'less_than_hs',
+                'median_wage': 26000, 'total_employment': 3100000, 'employment_weight': 0.078
+            },
+            '29-1141': {
+                'title': 'Registered Nurses', 'major_group': 'Healthcare', 'education_level': 'bachelors',
+                'median_wage': 75000, 'total_employment': 3200000, 'employment_weight': 0.08
+            },
+            '15-1211': {
+                'title': 'Computer Systems Analysts', 'major_group': 'Computer', 'education_level': 'bachelors',
+                'median_wage': 95000, 'total_employment': 600000, 'employment_weight': 0.015
+            }
+        }
+        
+        self._cache['occupations'] = realistic_occupations
+        
+        for state_code in self._cache['states'].keys():
+            self._cache['state_occupation_wages'][state_code] = {}
+            for occ_code, occ_data in realistic_occupations.items():
+                base_salary = occ_data['median_wage']
+                state_variation = random.uniform(0.9, 1.1)
+                
+                self._cache['state_occupation_wages'][state_code][occ_code] = {
+                    'annual_median': int(base_salary * state_variation),
+                    'annual_mean': int(base_salary * state_variation * 1.1)
+                }
+        
+        logger.info(f"✓ Created realistic fallback occupations")
+    
+    def _get_major_group_from_code(self, occ_code: str) -> str:
+        """Get major group from occupation code"""
+        if not occ_code or len(occ_code) < 2:
+            return 'Other'
+        
+        major_groups = {
+            '11': 'Management', '13': 'Business and Financial', '15': 'Computer and Mathematical',
+            '17': 'Architecture and Engineering', '19': 'Life, Physical, and Social Science',
+            '21': 'Community and Social Service', '23': 'Legal', '25': 'Educational',
+            '27': 'Arts and Entertainment', '29': 'Healthcare Practitioners', '31': 'Healthcare Support',
+            '33': 'Protective Service', '35': 'Food Service', '37': 'Building and Maintenance',
+            '39': 'Personal Care', '41': 'Sales', '43': 'Office Support', '45': 'Farming and Forestry',
+            '47': 'Construction', '49': 'Installation and Repair', '51': 'Production', '53': 'Transportation'
+        }
+        
+        return major_groups.get(occ_code[:2], 'Other')
+    
+    def _estimate_education_requirement(self, occ_title: str) -> str:
+        """Estimate education requirement from occupation title"""
+        title_lower = occ_title.lower() if occ_title else ""
+        
+        if any(word in title_lower for word in ['chief', 'director', 'manager', 'executive']):
+            return 'graduate'
+        elif any(word in title_lower for word in ['engineer', 'analyst', 'teacher', 'nurse']):
+            return 'bachelors'
+        elif any(word in title_lower for word in ['technician', 'assistant', 'specialist']):
+            return 'some_college'
+        elif any(word in title_lower for word in ['clerk', 'representative', 'operator']):
+            return 'high_school'
+        else:
+            return 'high_school'
+    
     def _weighted_random_selection(self, items: Dict[str, Any], weight_key: str = 'percent') -> str:
-        """Select item based on weighted probabilities - FIXED VERSION"""
+        """Select item based on weighted probabilities"""
         if not items:
             return None
         
@@ -891,17 +625,13 @@ class EnhancedFamilyGenerator:
         item_keys = list(items.keys())
         
         for key in item_keys:
-            # Handle both dictionary values and direct numeric values
             if isinstance(items[key], dict):
                 weight = items[key].get(weight_key, items[key].get('weight', 1))
             elif isinstance(items[key], (int, float)):
-                # Direct numeric value (like state weights)
                 weight = items[key]
             else:
-                # Fallback
                 weight = 1
             
-            # Ensure weight is numeric
             try:
                 weight = float(weight)
             except (ValueError, TypeError):
@@ -926,7 +656,6 @@ class EnhancedFamilyGenerator:
             target_state_upper = target_state.upper()
             if target_state_upper in self._cache['states']:
                 return target_state_upper
-            # Try to find by state name
             for state_code, state_data in self._cache['states'].items():
                 if state_data['name'].upper() == target_state_upper:
                     return state_code
@@ -939,7 +668,7 @@ class EnhancedFamilyGenerator:
         state_races = self._cache['state_race_data'].get(state_code, {})
         
         if not state_races:
-            race_key = 'WHITE_NON_HISPANIC'  # Fallback
+            race_key = 'WHITE_NON_HISPANIC'
             race_name = 'White Non-Hispanic'
         else:
             race_key = self._weighted_random_selection(state_races, 'percent')
@@ -995,6 +724,265 @@ class EnhancedFamilyGenerator:
         else:
             return 'Female' if random.random() < 0.51 else 'Male'
     
+    def _select_education_level(self, age: int, state_code: str, race_key: str) -> str:
+        """Select education level using real state demographic data"""
+        
+        if age < 18:
+            return 'less_than_hs'
+        
+        state_edu_dist = self._cache['state_education_distributions'].get(state_code, {})
+        
+        if state_edu_dist:
+            education_weights = []
+            education_levels = []
+            
+            for edu_level, percentage in state_edu_dist.items():
+                education_levels.append(edu_level)
+                education_weights.append(percentage)
+            
+            if education_weights and sum(education_weights) > 0:
+                if 18 <= age <= 24:
+                    adjusted_weights = []
+                    for i, edu_level in enumerate(education_levels):
+                        weight = education_weights[i]
+                        if edu_level == 'some_college':
+                            weight *= 1.5
+                        elif edu_level == 'graduate':
+                            weight *= 0.3
+                        elif edu_level == 'bachelors':
+                            weight *= 0.7
+                        adjusted_weights.append(weight)
+                    education_weights = adjusted_weights
+                
+                elif age >= 65:
+                    adjusted_weights = []
+                    for i, edu_level in enumerate(education_levels):
+                        weight = education_weights[i]
+                        if edu_level in ['less_than_hs', 'high_school']:
+                            weight *= 1.3
+                        elif edu_level in ['bachelors', 'graduate']:
+                            weight *= 0.7
+                        adjusted_weights.append(weight)
+                    education_weights = adjusted_weights
+                
+                return random.choices(education_levels, weights=education_weights)[0]
+        
+        return self._fallback_education_selection(age)
+
+    def _fallback_education_selection(self, age: int) -> str:
+        """Fallback education selection based on age"""
+        if age < 18:
+            return 'less_than_hs'
+        elif 18 <= age <= 24:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors'],
+                weights=[20, 50, 25, 5]
+            )[0]
+        elif age >= 65:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
+                weights=[30, 40, 15, 12, 3]
+            )[0]
+        else:
+            return random.choices(
+                ['less_than_hs', 'high_school', 'some_college', 'bachelors', 'graduate'],
+                weights=[12, 40, 28, 15, 5]
+            )[0]
+    
+    def _select_occupation(self, education_level: str, age: int, state_code: str) -> Optional[Dict[str, Any]]:
+        """Select occupation using real education-occupation probability matrix"""
+        
+        if age < 16:
+            return None
+        elif 16 <= age <= 18:
+            teen_suitable_groups = ['Food Preparation', 'Sales', 'Personal Care']
+            return self._select_teen_occupation(education_level, state_code, teen_suitable_groups)
+        
+        state_probs = self._cache['education_occupation_probs'].get(state_code, {})
+        education_probs = state_probs.get(education_level, [])
+        
+        if not education_probs:
+            education_probs = self._cache['national_education_occupation_probs'].get(education_level, [])
+        
+        if not education_probs:
+            return None
+        
+        employment_rate = self._get_real_employment_rate(education_level, state_code)
+        
+        if random.random() > employment_rate:
+            return self._generate_unemployment_benefits(age, education_level, state_code)
+        
+        total_prob = sum(occ['probability'] for occ in education_probs)
+        if total_prob <= 0:
+            return None
+        
+        rand_val = random.uniform(0, total_prob)
+        cumulative_prob = 0
+        
+        for occ_data in education_probs:
+            cumulative_prob += occ_data['probability']
+            if rand_val <= cumulative_prob:
+                return self._get_occupation_with_real_wages(occ_data['occ_code'], state_code)
+        
+        return self._get_occupation_with_real_wages(education_probs[0]['occ_code'], state_code)
+
+    def _select_teen_occupation(self, education_level: str, state_code: str, suitable_groups: List[str]) -> Optional[Dict[str, Any]]:
+        """Helper method for teen occupation selection"""
+        teen_jobs = []
+        for occ_code, occ_data in self._cache['occupations'].items():
+            if occ_data.get('major_group') in suitable_groups:
+                teen_jobs.append(occ_code)
+        
+        if teen_jobs and random.random() < 0.35:
+            occ_code = random.choice(teen_jobs)
+            return self._get_occupation_with_real_wages(occ_code, state_code, part_time=True)
+        return None
+
+    def _get_real_employment_rate(self, education_level: str, state_code: str) -> float:
+        """Get real employment rate for education level and state"""
+        
+        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
+        base_employment_rate = state_emp_data.get('employment_rate', 85.0) / 100
+        
+        education_multipliers = {
+            'less_than_hs': 0.85, 'high_school': 0.95, 'some_college': 1.02,
+            'bachelors': 1.08, 'graduate': 1.12
+        }
+        
+        multiplier = education_multipliers.get(education_level, 1.0)
+        adjusted_rate = min(0.98, base_employment_rate * multiplier)
+        
+        return adjusted_rate
+
+    def _get_occupation_with_real_wages(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
+        """Get occupation with real wages from OEWS database"""
+        
+        try:
+            self.cursor.execute("""
+                SELECT 
+                    ew.occ_title,
+                    ew.a_median,
+                    ew.a_mean,
+                    ew.tot_emp,
+                    od.major_group,
+                    er.typical_education_level_id,
+                    el.level_key
+                FROM oews.employment_wages ew
+                LEFT JOIN oews.occupation_details od ON ew.occ_code = od.occ_code
+                LEFT JOIN education.occupation_requirements er ON ew.occ_code = er.occ_code
+                LEFT JOIN education_levels el ON er.typical_education_level_id = el.id
+                WHERE ew.occ_code = %s AND ew.state_code = %s
+                ORDER BY ew.year DESC
+                LIMIT 1
+            """, (occ_code, state_code))
+            
+            result = self.cursor.fetchone()
+            
+            if result:
+                occ_title, a_median, a_mean, tot_emp, major_group, edu_level_id, edu_key = result
+                
+                base_wage = float(a_median) if a_median else float(a_mean) if a_mean else 35000
+                
+                if part_time:
+                    base_wage = int(base_wage * 0.4)
+                
+                annual_income = int(base_wage * random.uniform(0.9, 1.1))
+                
+                return {
+                    'occ_code': occ_code,
+                    'title': occ_title or 'Unknown Occupation',
+                    'major_group': major_group or 'Other',
+                    'education_requirement': edu_key or 'high_school',
+                    'annual_income': max(annual_income, 15000),
+                    'employment_type': 'Part-time' if part_time else 'Full-time',
+                    'data_source': 'database'
+                }
+        
+        except Exception as e:
+            logger.debug(f"Error getting real wages for {occ_code}: {e}")
+        
+        return self._get_occupation_details_realistic(occ_code, state_code, part_time)
+
+    def _generate_unemployment_benefits(self, age: int, education_level: str, state_code: str) -> Optional[Dict[str, Any]]:
+        """Generate realistic unemployment benefits based on state and education"""
+        
+        if age < 18:
+            return None
+        elif age >= 67:
+            monthly_ss = random.randint(800, 2800)
+            return {
+                'occ_code': 'RETIRED',
+                'title': 'Retired (Social Security)',
+                'major_group': 'Retired',
+                'education_requirement': education_level,
+                'annual_income': monthly_ss * 12,
+                'employment_type': 'Retired',
+                'data_source': 'calculated'
+            }
+        
+        state_emp_data = self._cache['state_employment_rates'].get(state_code, {})
+        unemployment_rate = state_emp_data.get('unemployment_rate', 5.0)
+        
+        benefit_probability = min(0.8, unemployment_rate / 10 + 0.4)
+        
+        if random.random() < benefit_probability:
+            base_weekly_benefit = {
+                'less_than_hs': 200, 'high_school': 280, 'some_college': 350,
+                'bachelors': 450, 'graduate': 520
+            }.get(education_level, 280)
+            
+            state_variation = random.uniform(0.8, 1.2)
+            weekly_benefit = int(base_weekly_benefit * state_variation)
+            annual_benefit = weekly_benefit * 26
+            
+            return {
+                'occ_code': 'UNEMPLOYED',
+                'title': 'Unemployed (Receiving Benefits)',
+                'major_group': 'Unemployed',
+                'education_requirement': education_level,
+                'annual_income': annual_benefit,
+                'employment_type': 'Unemployed',
+                'data_source': 'calculated'
+            }
+        else:
+            monthly_benefit = random.randint(700, 1400)
+            return {
+                'occ_code': 'DISABLED',
+                'title': 'Receiving Disability Benefits',
+                'major_group': 'Disabled',
+                'education_requirement': education_level,
+                'annual_income': monthly_benefit * 12,
+                'employment_type': 'Disabled',
+                'data_source': 'calculated'
+            }
+
+    def _get_occupation_details_realistic(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
+        """Fallback method for getting occupation details using cache"""
+        
+        occ_details = self._cache['occupations'].get(occ_code, {})
+        state_wages = self._cache['state_occupation_wages'].get(state_code, {}).get(occ_code, {})
+        
+        if state_wages and state_wages.get('annual_median'):
+            base_income = state_wages['annual_median']
+        elif occ_details.get('median_wage'):
+            base_income = occ_details['median_wage']
+        else:
+            base_income = 35000
+        
+        if part_time:
+            base_income = int(base_income * 0.4)
+        
+        annual_income = int(base_income * random.uniform(0.88, 1.12))
+        
+        return {
+            'occ_code': occ_code,
+            'title': occ_details.get('title', 'Unknown Occupation'),
+            'major_group': occ_details.get('major_group', 'Other'),
+            'education_requirement': occ_details.get('education_level', 'high_school'),
+            'annual_income': max(annual_income, 15000),
+            'employment_type': 'Part-time' if part_time else 'Full-time'
+        }
+    
     def _determine_employment_status(self, age: int, education_level: str, occupation: Dict = None) -> str:
         """Determine employment status with realistic rates"""
         
@@ -1010,7 +998,6 @@ class EnhancedFamilyGenerator:
         elif occupation:
             return "Employed"
         else:
-            # More realistic unemployment and non-participation rates
             return random.choices(
                 ["Unemployed", "Not in Labor Force"],
                 weights=[30, 70]
@@ -1088,7 +1075,7 @@ class EnhancedFamilyGenerator:
         members.append(spouse)
         
         # Children (maybe)
-        if random.random() < 0.7:  # 70% chance of having children
+        if random.random() < 0.7:
             child_count = random.choices([1, 2, 3], weights=[40, 40, 20])[0]
             for i in range(child_count):
                 child_age = self._generate_age('CHILD', {'parent_age': max(head_age, spouse_age)})
@@ -1169,38 +1156,689 @@ class EnhancedFamilyGenerator:
         
         return highest_level
 
-    def _get_occupation_details_realistic(self, occ_code: str, state_code: str, part_time: bool = False) -> Dict[str, Any]:
-        """Fallback method for getting occupation details using cache"""
+    # TAX CHARACTERISTICS METHODS
+    def _generate_tax_characteristics(self, family: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate comprehensive tax characteristics for a single family"""
         
-        occ_details = self._cache['occupations'].get(occ_code, {})
-        state_wages = self._cache['state_occupation_wages'].get(state_code, {}).get(occ_code, {})
+        # 1. Determine appropriate filing status
+        filing_status = self._determine_filing_status(family)
         
-        # Use actual database wages (prefer median over mean)
-        if state_wages and state_wages.get('annual_median'):
-            base_income = state_wages['annual_median']
-        elif occ_details.get('median_wage'):
-            base_income = occ_details['median_wage']
-        else:
-            base_income = 35000  # Last resort fallback
+        # 2. Generate deduction scenario
+        deduction_scenario = self._generate_deduction_scenario(family, filing_status)
         
-        # Handle part-time work (mainly for teenagers)
-        if part_time:
-            base_income = int(base_income * 0.4)  # ~40% of full-time
+        # 3. Add tax-relevant events
+        tax_events = self._generate_tax_events(family)
         
-        # Small realistic variation (±12%)
-        annual_income = int(base_income * random.uniform(0.88, 1.12))
+        # 4. Calculate estimated tax liability
+        tax_calculation = self._estimate_tax_liability(family, filing_status, deduction_scenario)
         
         return {
-            'occ_code': occ_code,
-            'title': occ_details.get('title', 'Unknown Occupation'),
-            'major_group': occ_details.get('major_group', 'Other'),
-            'education_requirement': occ_details.get('education_level', 'high_school'),
-            'annual_income': max(annual_income, 15000),  # Minimum wage floor
-            'employment_type': 'Part-time' if part_time else 'Full-time'
+            'tax_year': self.tax_year,
+            'filing_status': filing_status,
+            'deduction_scenario': deduction_scenario,
+            'tax_events': tax_events,
+            'estimated_tax_liability': tax_calculation,
+            'generation_timestamp': datetime.now().isoformat()
         }
     
-    def generate_family(self, target_state: str = None) -> Dict[str, Any]:
-        """Generate a complete family"""
+    def _determine_filing_status(self, family: Dict[str, Any]) -> Dict[str, Any]:
+        """Determine realistic filing status based on family structure and income"""
+        
+        family_type = family.get('family_type', '')
+        total_income = family.get('total_household_income', 0)
+        members = family.get('members', [])
+        
+        adults = [m for m in members if m.get('age', 0) >= 18]
+        dependents = [m for m in members if m.get('age', 0) < 18]
+        
+        if 'Married Couple' in family_type:
+            if total_income > self.income_thresholds['very_high_income']:
+                files_separately = random.random() < 0.15
+            elif total_income > self.income_thresholds['high_income']:
+                files_separately = random.random() < 0.08
+            else:
+                files_separately = random.random() < 0.02
+            
+            if files_separately:
+                spouse_1_income, spouse_2_income = self._split_household_income(members)
+                return {
+                    'status': 'married_filing_separately',
+                    'status_name': 'Married Filing Separately',
+                    'spouse_1_income': spouse_1_income,
+                    'spouse_2_income': spouse_2_income,
+                    'reason': 'Tax optimization strategy'
+                }
+            else:
+                return {
+                    'status': 'married_filing_jointly',
+                    'status_name': 'Married Filing Jointly',
+                    'joint_income': total_income
+                }
+        
+        elif 'Single Mother' in family_type or 'Single Father' in family_type:
+            return {
+                'status': 'head_of_household',
+                'status_name': 'Head of Household',
+                'dependents': len(dependents),
+                'qualifying_children': len([d for d in dependents if d.get('age', 0) < 17])
+            }
+        
+        else:
+            if dependents:
+                return {
+                    'status': 'head_of_household', 
+                    'status_name': 'Head of Household',
+                    'dependents': len(dependents)
+                }
+            else:
+                return {
+                    'status': 'single',
+                    'status_name': 'Single'
+                }
+    
+    def _split_household_income(self, members: List[Dict]) -> tuple:
+        """Split household income between spouses for separate filing"""
+        adults = [m for m in members if m.get('age', 0) >= 18 and m.get('annual_income', 0) > 0]
+        
+        if len(adults) >= 2:
+            spouse_1_income = adults[0].get('annual_income', 0)
+            spouse_2_income = adults[1].get('annual_income', 0)
+        elif len(adults) == 1:
+            spouse_1_income = adults[0].get('annual_income', 0)
+            spouse_2_income = 0
+        else:
+            spouse_1_income = 0
+            spouse_2_income = 0
+        
+        return spouse_1_income, spouse_2_income
+    
+    def _generate_deduction_scenario(self, family: Dict[str, Any], filing_status: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate realistic deduction scenario"""
+        
+        total_income = family.get('total_household_income', 0)
+        
+        income_bracket = self._get_income_bracket(total_income)
+        patterns = self.deduction_patterns[income_bracket]
+        
+        status = filing_status['status']
+        standard_deduction = self.standard_deductions.get(status, 13850)
+        
+        will_itemize = random.random() < patterns['itemize_probability']
+        
+        if will_itemize:
+            itemized_deductions = self._generate_itemized_deductions(family, total_income, patterns)
+            
+            total_itemized = sum(itemized_deductions.values())
+            if total_itemized > standard_deduction:
+                return {
+                    'deduction_type': 'itemized',
+                    'standard_deduction_amount': standard_deduction,
+                    'itemized_deductions': itemized_deductions,
+                    'total_deductions': total_itemized,
+                    'tax_benefit': total_itemized - standard_deduction
+                }
+        
+        return {
+            'deduction_type': 'standard',
+            'standard_deduction_amount': standard_deduction,
+            'total_deductions': standard_deduction,
+            'itemize_considered': will_itemize,
+            'reason_for_standard': 'Standard deduction is higher' if will_itemize else 'Standard deduction chosen'
+        }
+    
+    def _get_income_bracket(self, income: int) -> str:
+        """Determine income bracket for deduction patterns"""
+        if income < self.income_thresholds['low_income']:
+            return 'low_income'
+        elif income < self.income_thresholds['middle_income']:
+            return 'middle_income'
+        elif income < self.income_thresholds['high_income']:
+            return 'high_income'
+        else:
+            return 'very_high_income'
+    
+    def _generate_itemized_deductions(self, family: Dict, income: int, patterns: Dict) -> Dict[str, int]:
+        """Generate realistic itemized deductions"""
+        
+        deductions = {}
+        
+        # 1. State and Local Tax Deduction (SALT) - capped at $10,000
+        salt_percent = patterns['avg_state_local_tax_percent']
+        salt_amount = int(income * salt_percent * random.uniform(0.7, 1.3))
+        deductions['state_local_taxes'] = min(salt_amount, 10000)
+        
+        # 2. Mortgage Interest - if family likely owns home
+        home_ownership_prob = self._get_home_ownership_probability(income, family)
+        if random.random() < home_ownership_prob:
+            mortgage_percent = patterns['avg_mortgage_interest_percent']
+            mortgage_interest = int(income * mortgage_percent * random.uniform(0.5, 1.5))
+            max_mortgage_interest = min(50000, income * 0.25)
+            deductions['mortgage_interest'] = min(mortgage_interest, max_mortgage_interest)
+        
+        # 3. Charitable Contributions
+        charitable_percent = patterns['avg_charitable_percent']
+        charitable_amount = int(income * charitable_percent * random.uniform(0.3, 2.0))
+        max_charitable = int(income * 0.15)
+        deductions['charitable_contributions'] = min(charitable_amount, max_charitable)
+        
+        # 4. Medical Expenses (only excess over 7.5% AGI threshold)
+        medical_percent = patterns['avg_medical_percent']
+        total_medical = int(income * medical_percent * random.uniform(0.5, 3.0))
+        medical_threshold = int(income * 0.075)
+        if total_medical > medical_threshold:
+            deductions['medical_expenses'] = total_medical - medical_threshold
+        
+        return deductions
+    
+    def _get_home_ownership_probability(self, income: int, family: Dict) -> float:
+        """Estimate home ownership probability"""
+        
+        base_prob = 0.65
+        
+        if income < 30000:
+            income_multiplier = 0.4
+        elif income < 50000:
+            income_multiplier = 0.6
+        elif income < 75000:
+            income_multiplier = 0.8
+        elif income < 100000:
+            income_multiplier = 1.0
+        else:
+            income_multiplier = 1.2
+        
+        family_type = family.get('family_type', '')
+        if 'Married' in family_type:
+            family_multiplier = 1.3
+        elif 'Single Person' in family_type:
+            family_multiplier = 0.7
+        else:
+            family_multiplier = 1.0
+        
+        final_prob = min(0.95, base_prob * income_multiplier * family_multiplier)
+        return final_prob
+    
+    def _generate_tax_events(self, family: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate realistic tax-relevant events"""
+        
+        events = []
+        members = family.get('members', [])
+        total_income = family.get('total_household_income', 0)
+        
+        working_adults = [m for m in members if m.get('annual_income', 0) > 1000 and m.get('age', 0) >= 18]
+        children = [m for m in members if m.get('age', 0) < 18]
+        
+        # Generate various tax events based on probabilities
+        for adult in working_adults:
+            if random.random() < self.tax_event_probabilities['job_change']:
+                events.append(self._generate_job_change_event(adult))
+        
+        if random.random() < self.tax_event_probabilities['major_medical_expenses']:
+            events.append(self._generate_medical_expense_event(family, total_income))
+        
+        if random.random() < self.tax_event_probabilities['home_purchase']:
+            events.append(self._generate_home_purchase_event(family, total_income))
+        elif random.random() < self.tax_event_probabilities['home_sale']:
+            events.append(self._generate_home_sale_event(family, total_income))
+        
+        if random.random() < self.tax_event_probabilities['investment_activity']:
+            events.append(self._generate_investment_event(total_income))
+        
+        if children or any(m.get('age', 0) < 25 for m in members):
+            if random.random() < self.tax_event_probabilities['education_expenses']:
+                events.append(self._generate_education_expense_event(family))
+        
+        for adult in working_adults:
+            if random.random() < self.tax_event_probabilities['business_income']:
+                events.append(self._generate_business_income_event(adult))
+        
+        for adult in working_adults:
+            if adult.get('age', 0) >= 21 and random.random() < self.tax_event_probabilities['retirement_contribution']:
+                events.append(self._generate_retirement_contribution_event(adult))
+        
+        young_children = [c for c in children if c.get('age', 0) < 13]
+        if young_children and random.random() < self.tax_event_probabilities['dependent_care_expenses']:
+            events.append(self._generate_dependent_care_event(family, len(young_children)))
+        
+        return events
+    
+    def _generate_job_change_event(self, adult: Dict) -> Dict[str, Any]:
+        """Generate job change event"""
+        
+        old_income = adult.get('annual_income', 0)
+        change_type = random.choices(
+            ['promotion', 'new_job_same_pay', 'new_job_higher_pay', 'new_job_lower_pay', 'temporary_unemployment'],
+            weights=[20, 30, 25, 15, 10]
+        )[0]
+        
+        if change_type == 'promotion':
+            income_change = random.randint(int(old_income * 0.1), int(old_income * 0.3))
+            new_income = old_income + income_change
+        elif change_type == 'new_job_higher_pay':
+            income_change = random.randint(int(old_income * 0.05), int(old_income * 0.25))
+            new_income = old_income + income_change
+        elif change_type == 'new_job_lower_pay':
+            income_change = random.randint(int(old_income * 0.05), int(old_income * 0.20))
+            new_income = old_income - income_change
+        elif change_type == 'temporary_unemployment':
+            unemployment_months = random.randint(2, 4)
+            lost_income = int(old_income * unemployment_months / 12)
+            new_income = old_income - lost_income
+        else:
+            new_income = old_income
+        
+        return {
+            'event_type': 'job_change',
+            'event_date': self._random_date_in_tax_year(),
+            'person': adult.get('role', 'Adult'),
+            'change_type': change_type,
+            'old_annual_income': old_income,
+            'new_annual_income': max(0, new_income),
+            'income_impact': new_income - old_income
+        }
+    
+    def _generate_medical_expense_event(self, family: Dict, income: int) -> Dict[str, Any]:
+        """Generate major medical expense event"""
+        
+        members = family.get('members', [])
+        elderly = [m for m in members if m.get('age', 0) >= 65]
+        
+        if elderly:
+            base_expense = random.randint(15000, 50000)
+        else:
+            base_expense = random.randint(8000, 25000)
+        
+        if income > 100000:
+            expense_multiplier = random.uniform(0.6, 1.0)
+        else:
+            expense_multiplier = random.uniform(0.8, 1.4)
+        
+        total_expense = int(base_expense * expense_multiplier)
+        agi_threshold = int(income * 0.075)
+        deductible_amount = max(0, total_expense - agi_threshold)
+        
+        expense_types = [
+            'Emergency surgery', 'Cancer treatment', 'Chronic condition management',
+            'Dental procedures', 'Mental health treatment', 'Physical therapy'
+        ]
+        
+        return {
+            'event_type': 'major_medical_expenses',
+            'event_date': self._random_date_in_tax_year(),
+            'expense_type': random.choice(expense_types),
+            'total_medical_expenses': total_expense,
+            'agi_threshold': agi_threshold,
+            'potentially_deductible_amount': deductible_amount,
+            'tax_benefit_estimate': int(deductible_amount * 0.22)
+        }
+    
+    def _generate_home_purchase_event(self, family: Dict, income: int) -> Dict[str, Any]:
+        """Generate home purchase event"""
+        
+        price_multiplier = random.uniform(2.5, 5.0)
+        state_code = family.get('state_code', '06')
+        if state_code in ['06', '11', '22', '25', '36']:
+            price_multiplier = random.uniform(4.0, 7.0)
+        
+        home_price = max(150000, int(income * price_multiplier))
+        down_payment_percent = random.uniform(0.05, 0.20)
+        down_payment = int(home_price * down_payment_percent)
+        mortgage_amount = home_price - down_payment
+        interest_rate = random.uniform(0.035, 0.075)
+        annual_interest = int(mortgage_amount * interest_rate * 0.9)
+        
+        return {
+            'event_type': 'home_purchase',
+            'event_date': self._random_date_in_tax_year(),
+            'home_price': home_price,
+            'down_payment': down_payment,
+            'mortgage_amount': mortgage_amount,
+            'interest_rate': round(interest_rate * 100, 2),
+            'estimated_annual_mortgage_interest': annual_interest,
+            'closing_costs': int(home_price * 0.03)
+        }
+    
+    def _generate_home_sale_event(self, family: Dict, income: int) -> Dict[str, Any]:
+        """Generate home sale event"""
+        
+        current_value = random.randint(200000, int(income * 4))
+        ownership_years = random.randint(2, 15)
+        annual_appreciation = random.uniform(0.02, 0.06)
+        original_price = int(current_value / (1 + annual_appreciation) ** ownership_years)
+        capital_gain = current_value - original_price
+        selling_costs = int(current_value * 0.07)
+        
+        if ownership_years >= 2:
+            exclusion_amount = 250000
+            if 'Married' in family.get('family_type', ''):
+                exclusion_amount = 500000
+            taxable_gain = max(0, capital_gain - exclusion_amount)
+        else:
+            taxable_gain = capital_gain
+        
+        return {
+            'event_type': 'home_sale',
+            'event_date': self._random_date_in_tax_year(),
+            'sale_price': current_value,
+            'original_purchase_price': original_price,
+            'ownership_years': ownership_years,
+            'capital_gain': capital_gain,
+            'selling_costs': selling_costs,
+            'eligible_for_exclusion': ownership_years >= 2,
+            'taxable_capital_gain': max(0, taxable_gain),
+            'estimated_tax_owed': int(max(0, taxable_gain) * 0.15)
+        }
+    
+    def _generate_investment_event(self, income: int) -> Dict[str, Any]:
+        """Generate investment income/loss event"""
+        
+        if income < 50000:
+            investment_range = (500, 5000)
+        elif income < 100000:
+            investment_range = (1000, 15000) 
+        elif income < 200000:
+            investment_range = (5000, 50000)
+        else:
+            investment_range = (10000, 100000)
+        
+        event_type = random.choices(
+            ['capital_gains', 'capital_losses', 'dividend_income', 'interest_income'],
+            weights=[35, 25, 25, 15]
+        )[0]
+        
+        amount = random.randint(*investment_range)
+        if event_type == 'capital_losses':
+            amount = -amount
+        
+        is_long_term = random.random() < 0.6 if event_type in ['capital_gains', 'capital_losses'] else None
+        tax_rate = 0.15 if is_long_term else 0.22
+        
+        return {
+            'event_type': 'investment_activity',
+            'investment_type': event_type,
+            'amount': amount,
+            'is_long_term': is_long_term,
+            'estimated_tax_impact': int(abs(amount) * tax_rate) if amount > 0 else int(abs(amount) * 0.22 * -1),
+            'event_date': self._random_date_in_tax_year()
+        }
+    
+    def _generate_education_expense_event(self, family: Dict) -> Dict[str, Any]:
+        """Generate education expense event"""
+        
+        members = family.get('members', [])
+        students = [m for m in members if 16 <= m.get('age', 0) <= 24]
+        
+        if students:
+            student = random.choice(students)
+            age = student.get('age', 18)
+            if age >= 18:
+                expense_type = 'college_tuition'
+                base_cost = random.randint(8000, 25000)
+            else:
+                expense_type = 'educational_programs'
+                base_cost = random.randint(1000, 5000)
+            
+            books_supplies = random.randint(500, 1500)
+            total_expenses = base_cost + books_supplies
+            
+            if expense_type == 'college_tuition':
+                max_credit = 2500 if age <= 24 else 2000
+                estimated_credit = min(max_credit, int(total_expenses * 0.4))
+            else:
+                estimated_credit = 0
+            
+            return {
+                'event_type': 'education_expenses',
+                'student_age': age,
+                'student_role': student.get('role', 'Child'),
+                'expense_type': expense_type,
+                'tuition_fees': base_cost,
+                'books_supplies': books_supplies,
+                'total_expenses': total_expenses,
+                'estimated_tax_credit': estimated_credit,
+                'event_date': self._random_date_in_tax_year()
+            }
+        
+        return {
+            'event_type': 'education_expenses',
+            'expense_type': 'family_education',
+            'total_expenses': random.randint(500, 3000),
+            'estimated_tax_credit': 0,
+            'event_date': self._random_date_in_tax_year()
+        }
+    
+    def _generate_business_income_event(self, adult: Dict) -> Dict[str, Any]:
+        """Generate business/gig income event"""
+        
+        business_types = [
+            'freelance_consulting', 'ride_sharing', 'food_delivery', 'online_sales',
+            'tutoring', 'handyman_services', 'pet_sitting', 'rental_property'
+        ]
+        
+        business_type = random.choice(business_types)
+        
+        if business_type in ['freelance_consulting', 'rental_property']:
+            income_range = (5000, 30000)
+        elif business_type in ['ride_sharing', 'online_sales']:
+            income_range = (2000, 15000)
+        else:
+            income_range = (500, 8000)
+        
+        gross_income = random.randint(*income_range)
+        expense_ratio = random.uniform(0.15, 0.50)
+        business_expenses = int(gross_income * expense_ratio)
+        net_income = gross_income - business_expenses
+        se_tax = int(net_income * 0.1413)
+        
+        return {
+            'event_type': 'business_income',
+            'business_type': business_type,
+            'gross_business_income': gross_income,
+            'business_expenses': business_expenses,
+            'net_business_income': net_income,
+            'estimated_se_tax': se_tax,
+            'quarter_1099_issued': random.random() < 0.7,
+            'event_date': self._random_date_in_tax_year()
+        }
+    
+    def _generate_retirement_contribution_event(self, adult: Dict) -> Dict[str, Any]:
+        """Generate retirement contribution event"""
+        
+        income = adult.get('annual_income', 30000)
+        age = adult.get('age', 35)
+        
+        if age >= 50:
+            contribution_limit_401k = 30000
+            contribution_limit_ira = 7500
+        else:
+            contribution_limit_401k = 22500
+            contribution_limit_ira = 6500
+        
+        contribution_percent = random.uniform(0.03, 0.15)
+        desired_contribution = int(income * contribution_percent)
+        
+        account_types = ['401k', 'traditional_ira', 'roth_ira']
+        weights = [60, 25, 15]
+        
+        if income > 75000:
+            weights = [75, 15, 10]
+        
+        account_type = random.choices(account_types, weights=weights)[0]
+        
+        if account_type == '401k':
+            max_contribution = min(desired_contribution, contribution_limit_401k)
+            employer_match_rate = random.uniform(0, 0.06)
+            employer_match = min(int(income * employer_match_rate), int(max_contribution * 1.0))
+        else:
+            max_contribution = min(desired_contribution, contribution_limit_ira)
+            employer_match = 0
+        
+        tax_deduction = max_contribution if account_type != 'roth_ira' else 0
+        
+        return {
+            'event_type': 'retirement_contribution',
+            'account_type': account_type,
+            'employee_contribution': max_contribution,
+            'employer_match': employer_match,
+            'total_contribution': max_contribution + employer_match,
+            'tax_deductible_amount': tax_deduction,
+            'estimated_tax_savings': int(tax_deduction * 0.22),
+            'contribution_percent_of_income': round((max_contribution / income) * 100, 1),
+            'event_date': self._random_date_in_tax_year()
+        }
+    
+    def _generate_dependent_care_event(self, family: Dict, num_children: int) -> Dict[str, Any]:
+        """Generate dependent care expense event"""
+        
+        per_child_cost = random.randint(8000, 15000)
+        total_cost = per_child_cost * num_children
+        credit_eligible_expenses = min(total_cost, 6000)
+        
+        income = family.get('total_household_income', 50000)
+        if income < 15000:
+            credit_percent = 0.35
+        elif income < 43000:
+            credit_percent = 0.35 - ((income - 15000) / 28000) * 0.15
+        else:
+            credit_percent = 0.20
+        
+        estimated_credit = int(credit_eligible_expenses * credit_percent)
+        
+        care_types = ['daycare_center', 'family_daycare', 'nanny', 'after_school_program', 'summer_camp']
+        
+        return {
+            'event_type': 'dependent_care_expenses',
+            'number_of_children': num_children,
+            'care_type': random.choice(care_types),
+            'total_expenses': total_cost,
+            'credit_eligible_expenses': credit_eligible_expenses,
+            'estimated_credit': estimated_credit,
+            'monthly_cost': int(total_cost / 12),
+            'event_date': self._random_date_in_tax_year()
+        }
+    
+    def _estimate_tax_liability(self, family: Dict, filing_status: Dict, deduction_scenario: Dict) -> Dict[str, Any]:
+        """Estimate tax liability for the family"""
+        
+        income = family.get('total_household_income', 0)
+        status = filing_status.get('status', 'single')
+        total_deductions = deduction_scenario.get('total_deductions', 0)
+        
+        taxable_income = max(0, income - total_deductions)
+        federal_tax = self._calculate_federal_tax(taxable_income, status)
+        state_code = family.get('state_code', '06')
+        state_tax = self._estimate_state_tax(taxable_income, state_code)
+        fica_tax = min(income * 0.0765, 160200 * 0.062 + income * 0.0145)
+        total_tax = federal_tax + state_tax + fica_tax
+        effective_rate = (total_tax / income * 100) if income > 0 else 0
+        
+        return {
+            'gross_income': income,
+            'total_deductions': total_deductions,
+            'taxable_income': taxable_income,
+            'federal_income_tax': int(federal_tax),
+            'state_income_tax': int(state_tax),
+            'fica_tax': int(fica_tax),
+            'total_tax_liability': int(total_tax),
+            'effective_tax_rate': round(effective_rate, 2),
+            'marginal_tax_bracket': self._get_marginal_bracket(taxable_income, status)
+        }
+    
+    def _calculate_federal_tax(self, taxable_income: int, filing_status: str) -> float:
+        """Calculate federal income tax using 2023 tax brackets"""
+        
+        if filing_status in ['single', 'married_filing_separately']:
+            brackets = [
+                (11000, 0.10), (44725, 0.12), (95375, 0.22), (197050, 0.24),
+                (231250, 0.32), (578125, 0.35), (float('inf'), 0.37)
+            ]
+        elif filing_status == 'married_filing_jointly':
+            brackets = [
+                (22000, 0.10), (89450, 0.12), (190750, 0.22), (364200, 0.24),
+                (462500, 0.32), (693750, 0.35), (float('inf'), 0.37)
+            ]
+        else:
+            brackets = [
+                (15700, 0.10), (59850, 0.12), (95350, 0.22), (193350, 0.24),
+                (231250, 0.32), (578100, 0.35), (float('inf'), 0.37)
+            ]
+        
+        tax = 0
+        prev_bracket = 0
+        
+        for bracket_limit, rate in brackets:
+            if taxable_income <= prev_bracket:
+                break
+            
+            taxable_in_bracket = min(taxable_income - prev_bracket, bracket_limit - prev_bracket)
+            tax += taxable_in_bracket * rate
+            prev_bracket = bracket_limit
+            
+            if taxable_income <= bracket_limit:
+                break
+        
+        return tax
+    
+    def _estimate_state_tax(self, taxable_income: int, state_code: str) -> float:
+        """Estimate state income tax"""
+        
+        no_tax_states = ['02', '12', '32', '53', '48', '50', '82', '03', '47']
+        if state_code in no_tax_states:
+            return 0
+        
+        high_tax_states = ['06', '36', '34', '09', '25']
+        
+        if state_code in high_tax_states:
+            if taxable_income < 50000:
+                rate = 0.05
+            elif taxable_income < 100000:
+                rate = 0.07
+            else:
+                rate = 0.09
+        else:
+            if taxable_income < 50000:
+                rate = 0.03
+            elif taxable_income < 100000:
+                rate = 0.05
+            else:
+                rate = 0.06
+        
+        return taxable_income * rate
+    
+    def _get_marginal_bracket(self, taxable_income: int, filing_status: str) -> str:
+        """Get marginal tax bracket"""
+        
+        if filing_status in ['single', 'married_filing_separately']:
+            if taxable_income <= 11000:
+                return "10%"
+            elif taxable_income <= 44725:
+                return "12%"
+            elif taxable_income <= 95375:
+                return "22%"
+            elif taxable_income <= 197050:
+                return "24%"
+            elif taxable_income <= 231250:
+                return "32%"
+            elif taxable_income <= 578125:
+                return "35%"
+            else:
+                return "37%"
+        else:
+            return "22%"
+    
+    def _random_date_in_tax_year(self) -> str:
+        """Generate random date in tax year"""
+        start_date = datetime(self.tax_year, 1, 1)
+        end_date = datetime(self.tax_year, 12, 31)
+        
+        days_between = (end_date - start_date).days
+        random_days = random.randint(0, days_between)
+        
+        random_date = start_date + timedelta(days=random_days)
+        return random_date.strftime('%Y-%m-%d')
+    
+    # MAIN GENERATION METHODS
+    def generate_family(self, target_state: str = None, include_tax: bool = True) -> Dict[str, Any]:
+        """Generate a complete family with integrated tax characteristics"""
         
         try:
             # Select state
@@ -1220,7 +1858,8 @@ class EnhancedFamilyGenerator:
             # Calculate totals
             total_income = self._calculate_total_household_income(members)
             
-            return {
+            # Create base family data
+            family = {
                 "family_id": f"FAM_{random.randint(100000, 999999)}",
                 "state_code": state_code,
                 "state_name": state_info['name'],
@@ -1234,48 +1873,59 @@ class EnhancedFamilyGenerator:
                 "highest_education_level": self._get_highest_education_level(members),
                 "total_earners": sum(1 for member in members if member.get('annual_income', 0) > 0),
                 "generation_date": datetime.now().isoformat(),
-                "data_version": "enhanced_v1",
+                "data_version": "enhanced_v1_with_tax",
                 "members": members
             }
+            
+            # Add tax characteristics during family generation
+            if include_tax:
+                try:
+                    tax_data = self._generate_tax_characteristics(family)
+                    family['tax_characteristics'] = tax_data
+                except Exception as e:
+                    logger.warning(f"Failed to add tax characteristics to family {family['family_id']}: {e}")
+            
+            return family
             
         except Exception as e:
             logger.error(f"Family generation failed: {e}")
             raise
     
-    def generate_families(self, count: int = 5, target_state: str = None) -> List[Dict[str, Any]]:
-        """Generate multiple families"""
+    def generate_families(self, count: int = 5, target_state: str = None, include_tax: bool = True) -> List[Dict[str, Any]]:
+        """Generate multiple families with integrated tax characteristics"""
         families = []
         
-        logger.info(f"🏠 Starting generation of {count} families with enhanced database integration...")
+        tax_status = "with tax characteristics" if include_tax else "basic demographic data only"
+        logger.info(f"🏠 Starting generation of {count} families {tax_status}...")
         if target_state:
             logger.info(f"🎯 Target state: {target_state}")
         
         for i in range(count):
             try:
-                logger.debug(f"Generating family {i + 1}/{count}...")
-                family = self.generate_family(target_state)
+                family = self.generate_family(target_state, include_tax)
                 families.append(family)
                 
-                # More frequent progress updates for debugging
                 if (i + 1) % 1 == 0 or i == count - 1:
                     logger.info(f"  ✅ Generated {i + 1}/{count} families")
                     
             except Exception as e:
                 logger.warning(f"❌ Failed to generate family {i + 1}: {e}")
-                logger.debug(f"Full error: {e}", exc_info=True)
                 continue
         
         logger.info(f"🎉 Completed generation: {len(families)} families successfully created")
         return families
-    
+
     def print_family_summary(self, families: List[Dict]):
-        """Print summary of generated families"""
+        """Print comprehensive summary including tax characteristics"""
         if not families:
             logger.info("No families to summarize")
             return
         
         logger.info(f"\n=== ENHANCED FAMILY GENERATION SUMMARY ===")
         logger.info(f"Total families generated: {len(families)}")
+        
+        # Check if families have tax characteristics
+        has_tax_data = any(f.get('tax_characteristics') for f in families)
         
         # Income statistics
         incomes = [f['total_household_income'] for f in families]
@@ -1285,31 +1935,108 @@ class EnhancedFamilyGenerator:
             logger.info(f"Average household income: ${avg_income:,.0f}")
             logger.info(f"Median household income: ${median_income:,.0f}")
         
-        # Show families (all if 10 or fewer, otherwise first 10)
-        display_count = min(len(families), 10)
-        logger.info(f"\nShowing {display_count} of {len(families)} families:")
+        # Tax statistics (if available)
+        if has_tax_data:
+            filing_statuses = {}
+            deduction_types = {'standard': 0, 'itemized': 0}
+            tax_rates = []
+            total_events = 0
+            
+            for family in families:
+                tax_chars = family.get('tax_characteristics', {})
+                if tax_chars:
+                    # Filing status
+                    status = tax_chars.get('filing_status', {}).get('status_name', 'Unknown')
+                    filing_statuses[status] = filing_statuses.get(status, 0) + 1
+                    
+                    # Deduction type
+                    deduction_type = tax_chars.get('deduction_scenario', {}).get('deduction_type', 'standard')
+                    deduction_types[deduction_type] += 1
+                    
+                    # Tax rates
+                    tax_calc = tax_chars.get('estimated_tax_liability', {})
+                    if tax_calc.get('effective_tax_rate'):
+                        tax_rates.append(tax_calc['effective_tax_rate'])
+                    
+                    # Count events
+                    events = tax_chars.get('tax_events', [])
+                    total_events += len(events)
+            
+            logger.info(f"\n📊 TAX CHARACTERISTICS:")
+            if tax_rates:
+                avg_tax_rate = sum(tax_rates) / len(tax_rates)
+                logger.info(f"Average effective tax rate: {avg_tax_rate:.1f}%")
+            
+            logger.info(f"Filing status distribution:")
+            for status, count in filing_statuses.items():
+                pct = (count / len([f for f in families if f.get('tax_characteristics')])) * 100
+                logger.info(f"  {status}: {count} ({pct:.1f}%)")
+            
+            logger.info(f"Deduction type distribution:")
+            for deduction_type, count in deduction_types.items():
+                pct = (count / len([f for f in families if f.get('tax_characteristics')])) * 100
+                logger.info(f"  {deduction_type.title()}: {count} ({pct:.1f}%)")
+            
+            logger.info(f"Tax events: {total_events} total across all families")
+            logger.info(f"Average events per family: {total_events / len(families):.1f}")
+        
+        # Show detailed family examples
+        display_count = min(len(families), 5)
+        logger.info(f"\n📋 DETAILED FAMILY EXAMPLES ({display_count} of {len(families)}):")
         
         for i, family in enumerate(families[:display_count]):
-            logger.info(f"\nFamily {i + 1} (ID: {family['family_id']}):")
+            logger.info(f"\n--- Family {i + 1} (ID: {family['family_id']}) ---")
             logger.info(f"  Location: {family['state_name']}")
             logger.info(f"  Type: {family['family_type']}")
             logger.info(f"  Size: {family['family_size']} members")
-            logger.info(f"  Income: ${family['total_household_income']:,}")
+            logger.info(f"  Household Income: ${family['total_household_income']:,}")
             
+            # Show family members
             for member in family['members']:
                 occupation = member.get('occupation', 'No occupation')
                 income = member.get('annual_income', 0)
                 income_str = f", ${income:,}" if income > 0 else ""
                 logger.info(f"    {member['role']}: Age {member['age']}, {member['education_level']}, {occupation}{income_str}")
+            
+            # Show tax characteristics (if available)
+            tax_chars = family.get('tax_characteristics', {})
+            if tax_chars:
+                filing_status = tax_chars.get('filing_status', {})
+                deduction_info = tax_chars.get('deduction_scenario', {})
+                tax_calc = tax_chars.get('estimated_tax_liability', {})
+                events = tax_chars.get('tax_events', [])
+                
+                logger.info(f"  📋 Tax Profile:")
+                logger.info(f"    Filing Status: {filing_status.get('status_name', 'Unknown')}")
+                logger.info(f"    Deduction Strategy: {deduction_info.get('deduction_type', 'standard').title()}")
+                logger.info(f"    Total Deductions: ${deduction_info.get('total_deductions', 0):,}")
+                
+                if tax_calc:
+                    logger.info(f"    Estimated Tax Liability: ${tax_calc.get('total_tax_liability', 0):,}")
+                    logger.info(f"    Effective Tax Rate: {tax_calc.get('effective_tax_rate', 0):.1f}%")
+                
+                if events:
+                    logger.info(f"    Tax Events ({len(events)}):")
+                    for event in events[:3]:  # Show first 3 events
+                        event_type = event.get('event_type', 'Unknown').replace('_', ' ').title()
+                        logger.info(f"      • {event_type}")
+                    if len(events) > 3:
+                        logger.info(f"      • ... and {len(events) - 3} more events")
         
-        if len(families) > 10:
-            logger.info(f"\n... and {len(families) - 10} more families")
+        if len(families) > 5:
+            logger.info(f"\n... and {len(families) - 5} more families")
         
-        logger.info(f"\n📊 QUICK STATS:")
+        # Final statistics
+        logger.info(f"\n📊 SUMMARY STATISTICS:")
         logger.info(f"Family types: {set(f['family_type'] for f in families)}")
         logger.info(f"Income range: ${min(incomes):,} - ${max(incomes):,}")
         logger.info(f"Average family size: {sum(f['family_size'] for f in families) / len(families):.1f}")
-        logger.info(f"Data version: enhanced_v1 (with real database integration)")
+        
+        if has_tax_data:
+            logger.info(f"✅ Includes comprehensive tax characteristics")
+        logger.info(f"✅ Database integration with real demographic data")
+        logger.info(f"✅ Realistic income calculations using OEWS wage data")
+        logger.info(f"Data version: enhanced_v1_with_tax")
     
     def close(self):
         """Close database connection"""
@@ -1319,38 +2046,61 @@ class EnhancedFamilyGenerator:
             self.conn.close()
 
 def main():
-    """Main execution function"""
+    """Main execution function with integrated tax characteristics"""
     
     import argparse
     
-    # Parse command line arguments with argparse
-    parser = argparse.ArgumentParser(description='Generate realistic synthetic families with enhanced database integration')
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Generate realistic synthetic families with enhanced database integration and tax characteristics')
     parser.add_argument('--count', type=int, default=5, 
                        help='Number of families to generate (default: 5)')
     parser.add_argument('--state', type=str, default=None,
                        help='Target state (e.g., California, Texas)')
+    parser.add_argument('--no-tax', action='store_true', 
+                       help='Skip tax characteristics generation')
+    parser.add_argument('--output', type=str, default=None,
+                       help='Output JSON file (optional)')
     
     args = parser.parse_args()
     count = args.count
     target_state = args.state
+    include_tax = not args.no_tax  # Invert the flag
+    output_file = args.output
     
     # Debug logging
-    logger.info(f"🎯 Parsed arguments: count={count}, state={target_state}")
+    tax_status = "with tax characteristics" if include_tax else "basic data only"
+    logger.info(f"🎯 Parsed arguments: count={count}, state={target_state}, mode={tax_status}")
     
     try:
-        logger.info("🏠 ENHANCED FAMILY GENERATOR v1")
-        logger.info("="*40)
+        logger.info("🏠 ENHANCED FAMILY GENERATOR v1 WITH INTEGRATED TAX DATA")
+        logger.info("="*65)
         
-        # Initialize generator
+        # Initialize generator and generate families with integrated tax characteristics
         generator = EnhancedFamilyGenerator()
         
-        # Generate families
-        families = generator.generate_families(count, target_state)
+        # Generate families (tax characteristics included during generation)
+        families = generator.generate_families(count, target_state, include_tax)
         
-        # Print results
+        # Print comprehensive results (includes tax data in main summary)
         generator.print_family_summary(families)
         
-        logger.info(f"\n✅ Successfully generated {len(families)} families with enhanced database integration!")
+        # Save output (if requested)
+        if output_file:
+            logger.info(f"\n💾 Saving results to {output_file}...")
+            try:
+                with open(output_file, 'w') as f:
+                    json.dump(families, f, indent=2, default=str)
+                logger.info(f"✅ Successfully saved {len(families)} families to {output_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save to {output_file}: {e}")
+        
+        # Final summary
+        logger.info(f"\n🎉 GENERATION COMPLETE!")
+        logger.info(f"Successfully generated {len(families)} families")
+        if include_tax:
+            logger.info(f"✅ Tax characteristics integrated during family generation")
+        else:
+            logger.info(f"ℹ️  Basic demographic data only (tax characteristics skipped)")
         
         generator.close()
         return True
